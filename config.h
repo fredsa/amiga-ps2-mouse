@@ -81,8 +81,15 @@
 #define AMIGA_INVERT_Y          0
 
 // Default movement scaling numerator/denominator (e.g., 1/1 = 100% native counts)
-#define AMIGA_DEFAULT_SCALE_NUM 1
-#define AMIGA_DEFAULT_SCALE_DEN 1
+#define AMIGA_DEFAULT_SCALE_NUM     1
+#define AMIGA_DEFAULT_SCALE_DEN     1
+
+// Sensitivity feedback cursor wiggle parameters:
+// Each Left/Right pair uses WIGGLE_LEG_DURATION_MS per leg (>= 1 PAL/NTSC VBlank = 25 ms),
+// with WIGGLE_PAIR_PAUSE_MS pause between consecutive Left/Right pairs.
+#define WIGGLE_STEP_DELTA           16
+#define WIGGLE_LEG_DURATION_MS      25
+#define WIGGLE_PAIR_PAUSE_MS        250
 
 // Enable serial diagnostic output at 115200 baud
 #define ENABLE_SERIAL_DEBUG         1
