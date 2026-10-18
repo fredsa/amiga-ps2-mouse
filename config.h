@@ -85,6 +85,9 @@
 #define AMIGA_DEFAULT_SCALE_DEN 1
 
 // Enable serial diagnostic output at 115200 baud
-#define ENABLE_SERIAL_DEBUG     1
+#define ENABLE_SERIAL_DEBUG         1
+
+// Enable real-time verbose logging of mouse buttons and movement packets over USB Serial
+#define ENABLE_USB_VERBOSE_DEBUG    1
 
 #endif // CONFIG_H

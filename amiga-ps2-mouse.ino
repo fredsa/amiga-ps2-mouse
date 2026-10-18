@@ -28,7 +28,10 @@ static AmigaMouse amigaMouse(
 // Button chord detection for on-the-fly DPI / sensitivity switching
 static uint32_t s_chordStartMs = 0;
 static bool     s_chordTriggered = false;
-static bool     s_logPackets = false;
+static bool     s_verboseDebug = (ENABLE_USB_VERBOSE_DEBUG != 0);
+static bool     s_prevLeft = false;
+static bool     s_prevRight = false;
+static bool     s_prevMiddle = false;
 
 static void blinkStatusLed(uint8_t count, uint16_t onMs = 80, uint16_t offMs = 80) {
     for (uint8_t i = 0; i < count; i++) {
@@ -70,10 +73,12 @@ static void handleSerialCommands() {
                 amigaMouse.setScaling(2, 1);
                 Serial.println(F("[AmigaMouse] Sensitivity set to 200% (2:1)"));
                 break;
+            case 'v':
+            case 'V':
             case 'p':
             case 'P':
-                s_logPackets = !s_logPackets;
-                Serial.printf("[PS2Mouse] Packet logging %s\n", s_logPackets ? "ENABLED" : "DISABLED");
+                s_verboseDebug = !s_verboseDebug;
+                Serial.printf("[Debug] USB verbose packet logging %s\n", s_verboseDebug ? "ENABLED" : "DISABLED");
                 break;
             case 'r':
             case 'R':
@@ -87,14 +92,15 @@ static void handleSerialCommands() {
             case 's':
             case 'S':
                 Serial.printf(
-                    "[Status] Connected=%d | DevID=0x%02X | Wheel=%d | Packets=%lu | Errors=%lu | Pending=(%ld,%ld)\n",
+                    "[Status] Connected=%d | DevID=0x%02X | Wheel=%d | Packets=%lu | Errors=%lu | Pending=(%ld,%ld) | Verbose=%d\n",
                     ps2Mouse.isConnected() ? 1 : 0,
                     ps2Mouse.getDeviceId(),
                     ps2Mouse.hasScrollWheel() ? 1 : 0,
                     static_cast<unsigned long>(ps2Mouse.getPacketCount()),
                     static_cast<unsigned long>(ps2Mouse.getErrorCount()),
                     static_cast<long>(amigaMouse.getPendingX()),
-                    static_cast<long>(amigaMouse.getPendingY())
+                    static_cast<long>(amigaMouse.getPendingY()),
+                    s_verboseDebug ? 1 : 0
                 );
                 break;
             default:
@@ -126,6 +132,8 @@ void setup() {
                   PIN_AMIGA_V_PULSE, PIN_AMIGA_H_PULSE, PIN_AMIGA_VQ_PULSE, PIN_AMIGA_HQ_PULSE);
     Serial.printf(" Amiga Btns : LMB=GPIO%d, RMB=GPIO%d, MMB=GPIO%d\n",
                   PIN_AMIGA_LMB, PIN_AMIGA_RMB, PIN_AMIGA_MMB);
+    Serial.printf(" USB Verbose: %s (press 'v' in Serial Monitor to toggle)\n",
+                  s_verboseDebug ? "ENABLED" : "DISABLED");
 #endif
 
     bool ok = ps2Mouse.begin();
@@ -150,14 +158,24 @@ void loop() {
         amigaMouse.processPs2Packet(packet);
 
 #if ENABLE_SERIAL_DEBUG
-        if (s_logPackets) {
-            Serial.printf("[Pkt #%lu] dx=%4d dy=%4d | L=%d R=%d M=%d | Err=%lu\n",
+        if (s_verboseDebug) {
+            bool btnChanged = (packet.leftButton != s_prevLeft) ||
+                              (packet.rightButton != s_prevRight) ||
+                              (packet.middleButton != s_prevMiddle);
+            s_prevLeft   = packet.leftButton;
+            s_prevRight  = packet.rightButton;
+            s_prevMiddle = packet.middleButton;
+
+            Serial.printf("[PS2 #%lu] dx=%4d dy=%4d | Btns: L=%d R=%d M=%d%s | AmigaPending=(%4ld,%4ld) | Err=%lu\n",
                           static_cast<unsigned long>(ps2Mouse.getPacketCount()),
                           packet.dx,
                           packet.dy,
                           packet.leftButton ? 1 : 0,
                           packet.rightButton ? 1 : 0,
                           packet.middleButton ? 1 : 0,
+                          btnChanged ? " [BTN_CHG]" : "",
+                          static_cast<long>(amigaMouse.getPendingX()),
+                          static_cast<long>(amigaMouse.getPendingY()),
                           static_cast<unsigned long>(ps2Mouse.getErrorCount()));
         }
 #endif
