@@ -75,6 +75,16 @@ The Amiga 1000 Mouse Port (Port 1) uses a standard DE-9 male connector on the co
     - **Left Click**: Decrease sensitivity by 1 level (minimum `#1`), acknowledged by `N` **Up/Down** jiggles (`1`–`5`).
     - **Right Click**: Increase sensitivity by 1 level (maximum `#5`), acknowledged by `N` **Up/Down** jiggles (`1`–`5`).
     - **Middle Click**: Toggle the **Swap Left/Right Buttons** flag, acknowledged by **1 Left/Right** wiggle.
+  - **Sensitivity Presets (`SCALING_PRESETS` in [`amiga_mouse.cpp`](amiga_mouse.cpp)):**
+
+    | Preset | Speed | Scale Ratio | Feedback (Up/Down Jiggles) | Notes |
+    | :---: | :---: | :---: | :---: | :--- |
+    | **#1** | `50%` | `1 : 2` | 1× Up/Down | Fine precision |
+    | **#2** | `75%` | `3 : 4` | 2× Up/Down | — |
+    | **#3** | `100%` | `1 : 1` | 3× Up/Down | **Default** (1:1 native counts) |
+    | **#4** | `150%` | `3 : 2` | 4× Up/Down | — |
+    | **#5** | `200%` | `2 : 1` | 5× Up/Down | Fast |
+
   - Real-time USB Serial packet and button logging is enabled by default via `ENABLE_USB_VERBOSE_DEBUG` in [`config.h`](config.h).
   - Send keys `1`–`5` (sensitivity), `b` (toggle button swap), `v` (toggle verbose logging), `s` (status), or `r` (reset mouse) over the 115200 baud USB Serial Monitor.
 - **Hot-Plug Support:** Automatically detects the PS/2 `0xAA 0x00` Basic Assurance Test sequence if the mouse is unplugged and reconnected.
