@@ -135,6 +135,7 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
             size_t nextHead = (_rxHead + 1) % RX_BUFFER_SIZE;
             if (nextHead != _rxTail) {
                 _rxBuffer[_rxHead] = _incomingByte;
+                _rxTimeUs[_rxHead] = nowUs;
                 _rxHead = nextHead;
             } else {
                 _errorCount++;
@@ -148,13 +149,19 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
     }
 }
 
-bool PS2Mouse::readByteFromBuffer(uint8_t &outByte) {
+bool PS2Mouse::readByteFromBuffer(uint8_t &outByte, uint32_t &outTimeUs) {
     if (_rxTail == _rxHead) {
         return false;
     }
     outByte = _rxBuffer[_rxTail];
+    outTimeUs = _rxTimeUs[_rxTail];
     _rxTail = (_rxTail + 1) % RX_BUFFER_SIZE;
     return true;
+}
+
+bool PS2Mouse::readByteFromBuffer(uint8_t &outByte) {
+    uint32_t unusedTimeUs = 0;
+    return readByteFromBuffer(outByte, unusedTimeUs);
 }
 
 bool PS2Mouse::waitByte(uint8_t &outByte, uint32_t timeoutMs) {
@@ -419,6 +426,7 @@ bool PS2Mouse::begin() {
 
 bool PS2Mouse::poll(PS2MousePacket &outPacket) {
     uint8_t b = 0;
+    uint32_t byteTimeUs = 0;
 
     // If the ISR detected any framing/parity error, discard any partial packet
     if (_rxFrameError) {
@@ -426,17 +434,17 @@ bool PS2Mouse::poll(PS2MousePacket &outPacket) {
         _packetIndex = 0;
     }
 
-    while (readByteFromBuffer(b)) {
-        uint32_t nowUs = micros();
+    while (readByteFromBuffer(b, byteTimeUs)) {
         uint32_t nowMs = millis();
 
-        // Bytes within the same packet arrive ~1 ms apart, whereas consecutive
-        // packets are ~10 ms apart (at 100 Hz). Any gap > 3.5 ms means a new
-        // packet is starting, so discard any stale partial packet bytes.
-        if (_packetIndex > 0 && (nowUs - _lastPacketByteUs) > PS2_PACKET_TIMEOUT_US) {
+        // Bytes within the same packet arrive ~1 ms apart on the wire, whereas
+        // consecutive packets are ~10 ms apart (at 100 Hz). Comparing ISR capture
+        // timestamps ensures USB Serial debug printing delays never cause false
+        // packet timeouts. Any wire gap > 3.5 ms means a new packet is starting.
+        if (_packetIndex > 0 && (byteTimeUs - _lastPacketByteUs) > PS2_PACKET_TIMEOUT_US) {
             _packetIndex = 0;
         }
-        _lastPacketByteUs = nowUs;
+        _lastPacketByteUs = byteTimeUs;
 
         uint32_t idleMs = nowMs - _lastActivityMs;
         _lastActivityMs = nowMs;

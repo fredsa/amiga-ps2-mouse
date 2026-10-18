@@ -53,6 +53,7 @@ private:
     // ISR state for Device-to-Host 11-bit frame reception
     static constexpr size_t RX_BUFFER_SIZE = 64;
     volatile uint8_t  _rxBuffer[RX_BUFFER_SIZE];
+    volatile uint32_t _rxTimeUs[RX_BUFFER_SIZE];
     volatile size_t   _rxHead;
     volatile size_t   _rxTail;
     volatile uint8_t  _bitIndex;
@@ -85,6 +86,7 @@ private:
 
     // Ring buffer helpers
     bool readByteFromBuffer(uint8_t &outByte);
+    bool readByteFromBuffer(uint8_t &outByte, uint32_t &outTimeUs);
     bool waitByte(uint8_t &outByte, uint32_t timeoutMs);
     void clearRxBuffer();
 
