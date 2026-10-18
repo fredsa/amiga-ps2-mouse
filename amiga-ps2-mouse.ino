@@ -49,6 +49,25 @@ static void blinkStatusLed(uint8_t count, uint16_t onMs = 80, uint16_t offMs = 8
     }
 }
 
+static void wiggleCursorLeftRight(int32_t stepDelta = 24, uint16_t legDurationMs = 50) {
+    static const int8_t DIRECTIONS[4] = { -1, +1, -1, +1 }; // Left, Right, Left, Right
+    for (uint8_t i = 0; i < 4; i++) {
+        int32_t dx = DIRECTIONS[i] * stepDelta;
+        amigaMouse.queueRawSteps(dx, 0);
+#if ENABLE_SERIAL_DEBUG
+        if (s_verboseDebug) {
+            Serial.printf("[AmigaMouse] Artificial wiggle %s (%+ld steps)\n",
+                          (dx < 0) ? "LEFT" : "RIGHT",
+                          static_cast<long>(dx));
+        }
+#endif
+        uint32_t t0 = millis();
+        while ((millis() - t0) < legDurationMs || amigaMouse.getPendingX() != 0) {
+            amigaMouse.update();
+        }
+    }
+}
+
 static void handleSerialCommands() {
 #if ENABLE_SERIAL_DEBUG
     while (Serial.available() > 0) {
@@ -208,6 +227,7 @@ void loop() {
 #if ENABLE_SERIAL_DEBUG
         Serial.printf("[AmigaMouse] Sensitivity preset cycled to #%u\n", presetNum);
 #endif
+        wiggleCursorLeftRight();
         blinkStatusLed(presetNum);
     }
 

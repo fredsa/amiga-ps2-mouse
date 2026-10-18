@@ -165,6 +165,11 @@ void AmigaMouse::processPs2Packet(const PS2MousePacket &packet) {
     _accumY = constrain(_accumY + stepsY, -AMIGA_MAX_ACCUMULATED_DELTA, AMIGA_MAX_ACCUMULATED_DELTA);
 }
 
+void AmigaMouse::queueRawSteps(int32_t stepsX, int32_t stepsY) {
+    _accumX = constrain(_accumX + stepsX, -AMIGA_MAX_ACCUMULATED_DELTA, AMIGA_MAX_ACCUMULATED_DELTA);
+    _accumY = constrain(_accumY + stepsY, -AMIGA_MAX_ACCUMULATED_DELTA, AMIGA_MAX_ACCUMULATED_DELTA);
+}
+
 uint32_t AmigaMouse::computeStepIntervalUs(int32_t pendingSteps) const {
     int32_t mag = abs(pendingSteps);
     if (mag >= 16) {

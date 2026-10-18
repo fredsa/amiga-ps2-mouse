@@ -21,6 +21,9 @@ public:
     // Queue a decoded PS/2 mouse report for translation to Amiga signaling
     void processPs2Packet(const PS2MousePacket &packet);
 
+    // Directly queue unscaled quadrature steps (e.g., for visual cursor feedback)
+    void queueRawSteps(int32_t stepsX, int32_t stepsY);
+
     // Non-blocking microsecond state machine that outputs quadrature transitions
     // at a controlled rate safe for the Amiga 1000 Denise (8362) JOY0DAT counters.
     // Call this as frequently as possible from loop().
