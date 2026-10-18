@@ -42,6 +42,8 @@ static bool        s_verboseDebug     = (ENABLE_USB_VERBOSE_DEBUG != 0);
 static bool        s_prevLeft         = false;
 static bool        s_prevRight        = false;
 static bool        s_prevMiddle       = false;
+static bool        s_prevBtn4         = false;
+static bool        s_prevBtn5         = false;
 
 // Non-blocking status LED blink state machine
 static uint8_t  s_ledBlinksRemaining = 0;
@@ -213,7 +215,10 @@ static void handleSerialCommands() {
             case 'R':
                 Serial.println(F("[PS2Mouse] Resetting PS/2 mouse..."));
                 if (ps2Mouse.begin()) {
-                    Serial.println(F("[PS2Mouse] Reset & initialization succeeded."));
+                    Serial.printf("[PS2Mouse] Reset & initialization succeeded. Device ID=0x%02X (%s)\n",
+                                  ps2Mouse.getDeviceId(),
+                                  ps2Mouse.getDeviceId() == 0x04 ? "IntelliMouse Explorer 4-byte (5-btn + scroll)" :
+                                  (ps2Mouse.hasScrollWheel() ? "IntelliMouse 4-byte (scroll wheel/nub)" : "Standard PS/2 3-byte"));
                 } else {
                     Serial.println(F("[PS2Mouse] Reset failed (check wiring/power)."));
                 }
@@ -273,7 +278,8 @@ void setup() {
 #if ENABLE_SERIAL_DEBUG
         Serial.printf("[PS2Mouse] Initialized! Device ID=0x%02X (%s)\n",
                       ps2Mouse.getDeviceId(),
-                      ps2Mouse.hasScrollWheel() ? "IntelliMouse 4-byte" : "Standard PS/2 3-byte");
+                      ps2Mouse.getDeviceId() == 0x04 ? "IntelliMouse Explorer 4-byte (5-btn + scroll)" :
+                      (ps2Mouse.hasScrollWheel() ? "IntelliMouse 4-byte (scroll wheel/nub)" : "Standard PS/2 3-byte"));
 #endif
     } else {
 #if ENABLE_SERIAL_DEBUG
@@ -290,19 +296,27 @@ void loop() {
         if (s_verboseDebug) {
             bool btnChanged = (packet.leftButton != s_prevLeft) ||
                               (packet.rightButton != s_prevRight) ||
-                              (packet.middleButton != s_prevMiddle);
+                              (packet.middleButton != s_prevMiddle) ||
+                              (packet.button4 != s_prevBtn4) ||
+                              (packet.button5 != s_prevBtn5);
             s_prevLeft   = packet.leftButton;
             s_prevRight  = packet.rightButton;
             s_prevMiddle = packet.middleButton;
+            s_prevBtn4   = packet.button4;
+            s_prevBtn5   = packet.button5;
 
-            Serial.printf("[PS2 #%lu] dx=%4d dy=%4d | PhysBtns: L=%d R=%d M=%d%s | Cfg=%u | AmigaPending=(%4ld,%4ld) | Err=%lu\n",
+            Serial.printf("[PS2 #%lu] dx=%4d dy=%4d dz=%3d | PhysBtns: L=%d R=%d M=%d B4=%d B5=%d%s%s | Cfg=%u | AmigaPending=(%4ld,%4ld) | Err=%lu\n",
                           static_cast<unsigned long>(ps2Mouse.getPacketCount()),
                           packet.dx,
                           packet.dy,
+                          packet.dz,
                           packet.leftButton ? 1 : 0,
                           packet.rightButton ? 1 : 0,
                           packet.middleButton ? 1 : 0,
+                          packet.button4 ? 1 : 0,
+                          packet.button5 ? 1 : 0,
                           btnChanged ? " [BTN_CHG]" : "",
+                          (packet.dz != 0) ? " [SCROLL]" : "",
                           static_cast<unsigned>(s_configState),
                           static_cast<long>(amigaMouse.getPendingX()),
                           static_cast<long>(amigaMouse.getPendingY()),

@@ -334,7 +334,7 @@ bool PS2Mouse::enableStreaming() {
 }
 
 bool PS2Mouse::tryEnableIntelliMouse() {
-    // Microsoft IntelliMouse magic knock sequence: sample rates 200, 100, 80
+    // 1. Microsoft IntelliMouse magic knock sequence (wheel / scroll nub): 200, 100, 80
     if (!setSampleRate(200)) return false;
     if (!setSampleRate(100)) return false;
     if (!setSampleRate(80))  return false;
@@ -343,13 +343,27 @@ bool PS2Mouse::tryEnableIntelliMouse() {
         return false;
     }
     uint8_t id = 0;
-    if (waitByte(id, 100)) {
-        _deviceId = id;
-        _hasWheel = (id == 0x03 || id == 0x04);
-        _packetSize = _hasWheel ? 4 : 3;
-        return _hasWheel;
+    if (!waitByte(id, 100)) {
+        return false;
     }
-    return false;
+
+    // 2. If IntelliMouse (0x03) succeeded, also try IntelliMouse Explorer
+    //    magic knock sequence (5-button + 2D scroll nub/wheel): 200, 200, 80
+    if (id == 0x03) {
+        if (setSampleRate(200) && setSampleRate(200) && setSampleRate(80)) {
+            if (sendCommand(PS2_CMD_GET_DEVICE_ID)) {
+                uint8_t expId = 0;
+                if (waitByte(expId, 100) && (expId == 0x03 || expId == 0x04)) {
+                    id = expId;
+                }
+            }
+        }
+    }
+
+    _deviceId = id;
+    _hasWheel = (id == 0x03 || id == 0x04);
+    _packetSize = _hasWheel ? 4 : 3;
+    return _hasWheel;
 }
 
 bool PS2Mouse::resetDevice() {
@@ -385,13 +399,26 @@ bool PS2Mouse::configureDevice() {
         }
     }
 
-    // Keep mouse in standard 3-byte PS/2 mode (Device ID 0x00).
-    // Standard 3-byte packets already report all 3 buttons (LMB, RMB, MMB) in
-    // Byte 0, and avoiding 4-byte IntelliMouse mode eliminates 3-vs-4 byte
-    // packet size mismatches across clones while reducing bus traffic by 25%.
+    // Configure 1:1 scaling and resolution before negotiating IntelliMouse extensions
     sendCommand(PS2_CMD_SET_SCALING_1_1);
     setResolution(PS2_DEFAULT_RESOLUTION);
+
+    // Enable full mouse functionality (IntelliMouse 0x03 or Explorer 0x04) if supported
+    tryEnableIntelliMouse();
+
+    // Set final operating sample rate
     setSampleRate(PS2_DEFAULT_SAMPLE_RATE);
+
+    // Re-query Device ID (0xF2) after all sample-rate/configuration commands so
+    // _packetSize (3 vs 4 bytes) is guaranteed to match the mouse's actual mode.
+    if (sendCommand(PS2_CMD_GET_DEVICE_ID)) {
+        uint8_t finalId = 0;
+        if (waitByte(finalId, 100)) {
+            _deviceId = finalId;
+            _hasWheel = (finalId == 0x03 || finalId == 0x04);
+            _packetSize = _hasWheel ? 4 : 3;
+        }
+    }
 
     // Enable continuous data reporting (0xF4)
     if (!enableStreaming()) {
@@ -493,7 +520,30 @@ bool PS2Mouse::poll(PS2MousePacket &outPacket) {
 
             outPacket.dx = dx;
             outPacket.dy = dy;
-            outPacket.dz = (_packetSize == 4) ? static_cast<int8_t>(_packetBuf[3]) : 0;
+
+            if (_packetSize == 4) {
+                uint8_t b3 = _packetBuf[3];
+                outPacket.rawZ = b3;
+                if (_deviceId == 0x04 && (b3 & 0xC0) == 0) {
+                    // IntelliMouse Explorer (0x04): bits 0..3 = 4-bit signed scroll,
+                    // bit 4 = Button 4, bit 5 = Button 5
+                    uint8_t z4 = b3 & 0x0F;
+                    outPacket.dz = (z4 & 0x08) ? static_cast<int8_t>(z4) - 16
+                                               : static_cast<int8_t>(z4);
+                    outPacket.button4 = (b3 & 0x10) != 0;
+                    outPacket.button5 = (b3 & 0x20) != 0;
+                } else {
+                    // Standard IntelliMouse (0x03) or sign-extended 8-bit Z delta
+                    outPacket.dz = static_cast<int8_t>(b3);
+                    outPacket.button4 = false;
+                    outPacket.button5 = false;
+                }
+            } else {
+                outPacket.rawZ = 0;
+                outPacket.dz = 0;
+                outPacket.button4 = false;
+                outPacket.button5 = false;
+            }
             return true;
         }
     }

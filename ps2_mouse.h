@@ -8,10 +8,13 @@
 struct PS2MousePacket {
     int16_t dx;          // Signed X movement (+Right, -Left)
     int16_t dy;          // Signed Y movement (+Up, -Down in PS/2 coordinates)
-    int8_t  dz;          // Signed Z scroll wheel movement (if IntelliMouse active)
+    int8_t  dz;          // Signed Z scroll wheel / scroll nub movement (if IntelliMouse active)
+    uint8_t rawZ;        // Raw 4th byte from IntelliMouse / Explorer packet
     bool    leftButton;  // Left mouse button pressed
     bool    rightButton; // Right mouse button pressed
     bool    middleButton;// Middle mouse button pressed
+    bool    button4;     // 4th mouse button pressed (IntelliMouse Explorer 0x04)
+    bool    button5;     // 5th mouse button pressed (IntelliMouse Explorer 0x04)
     bool    xOverflow;   // X delta overflow flag
     bool    yOverflow;   // Y delta overflow flag
 };
