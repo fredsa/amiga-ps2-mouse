@@ -30,16 +30,17 @@ enum ConfigState : uint8_t {
     CFG_IDLE = 0,
     CFG_WAIT_RELEASE_ALL,   // Waiting for all 3 buttons to be released after entering config mode
     CFG_WAIT_SINGLE_CLICK,  // Waiting for Left (decrease), Right (increase), or Middle (swap L/R) click
-    CFG_WAIT_CLICK_RELEASE  // Waiting for the single clicked button to be released before resuming
+    CFG_WAIT_ACK_COMPLETE   // Waiting for clicked button release AND full acknowledgment jiggle completion
 };
 
-static ConfigState s_configState    = CFG_IDLE;
-static uint32_t    s_chordStartMs   = 0;
-static bool        s_allButtonsHeld = false;
-static bool        s_verboseDebug   = (ENABLE_USB_VERBOSE_DEBUG != 0);
-static bool        s_prevLeft       = false;
-static bool        s_prevRight      = false;
-static bool        s_prevMiddle     = false;
+static ConfigState s_configState      = CFG_IDLE;
+static bool        s_cfgClickReleased = false;
+static uint32_t    s_chordStartMs     = 0;
+static bool        s_allButtonsHeld   = false;
+static bool        s_verboseDebug     = (ENABLE_USB_VERBOSE_DEBUG != 0);
+static bool        s_prevLeft         = false;
+static bool        s_prevRight        = false;
+static bool        s_prevMiddle       = false;
 
 // Non-blocking status LED blink state machine
 static uint8_t  s_ledBlinksRemaining = 0;
@@ -302,13 +303,11 @@ void loop() {
 #endif
 
         if (s_configState == CFG_IDLE) {
-            // If user moves the mouse while a post-config feedback jiggle is still playing,
-            // cancel the remaining jiggle legs immediately so real movement is crisp.
-            if (s_wiggleLegIndex < s_wiggleTotalLegs && (abs(packet.dx) > 2 || abs(packet.dy) > 2)) {
-                s_wiggleLegIndex = s_wiggleTotalLegs;
+            // While an acknowledgment jiggle is active (e.g. triggered via Serial),
+            // ignore mouse movement so the full jiggle is clearly seen.
+            if (s_wiggleLegIndex >= s_wiggleTotalLegs) {
+                amigaMouse.processPs2Packet(packet);
             }
-
-            amigaMouse.processPs2Packet(packet);
 
             // Track 3-button configuration mode chord (physical LMB + RMB + MMB)
             bool allThree = packet.leftButton && packet.rightButton && packet.middleButton;
@@ -341,7 +340,8 @@ void loop() {
 #endif
                 startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
                 startStatusLedBlink(presetNum);
-                s_configState = CFG_WAIT_CLICK_RELEASE;
+                s_cfgClickReleased = false;
+                s_configState = CFG_WAIT_ACK_COMPLETE;
             } else if (packet.rightButton && !packet.leftButton && !packet.middleButton) {
                 amigaMouse.increaseSensitivityPreset();
                 uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
@@ -350,7 +350,8 @@ void loop() {
 #endif
                 startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
                 startStatusLedBlink(presetNum);
-                s_configState = CFG_WAIT_CLICK_RELEASE;
+                s_cfgClickReleased = false;
+                s_configState = CFG_WAIT_ACK_COMPLETE;
             } else if (packet.middleButton && !packet.leftButton && !packet.rightButton) {
                 bool swapped = amigaMouse.toggleLeftRightSwapped();
 #if ENABLE_SERIAL_DEBUG
@@ -359,17 +360,14 @@ void loop() {
 #endif
                 startCursorJiggle(1, false); // Acknowledge with 1 Left/Right wiggle
                 startStatusLedBlink(1);
-                s_configState = CFG_WAIT_CLICK_RELEASE;
+                s_cfgClickReleased = false;
+                s_configState = CFG_WAIT_ACK_COMPLETE;
             }
-        } else if (s_configState == CFG_WAIT_CLICK_RELEASE) {
-            // Wait for the clicked button to be released before returning to normal operation
+        } else if (s_configState == CFG_WAIT_ACK_COMPLETE) {
+            // Keep mouse movement disabled while acknowledgment jiggle plays;
+            // record when the clicked button has been released.
             if (!packet.leftButton && !packet.rightButton && !packet.middleButton) {
-                s_configState = CFG_IDLE;
-                s_allButtonsHeld = false;
-                s_chordStartMs = 0;
-#if ENABLE_SERIAL_DEBUG
-                Serial.println(F("[ConfigMode] Exited configuration mode."));
-#endif
+                s_cfgClickReleased = true;
             }
         }
     }
@@ -396,6 +394,21 @@ void loop() {
     // Advance non-blocking feedback animations
     updateCursorJiggle();
     updateStatusLedBlink();
+
+    // Exit configuration mode only after BOTH the clicked button is released
+    // AND the entire acknowledgment jiggle has finished playing on screen.
+    if (s_configState == CFG_WAIT_ACK_COMPLETE &&
+        s_cfgClickReleased &&
+        s_wiggleLegIndex >= s_wiggleTotalLegs &&
+        amigaMouse.getPendingX() == 0 &&
+        amigaMouse.getPendingY() == 0) {
+        s_configState = CFG_IDLE;
+        s_allButtonsHeld = false;
+        s_chordStartMs = 0;
+#if ENABLE_SERIAL_DEBUG
+        Serial.println(F("[ConfigMode] Acknowledgment complete. Exited configuration mode."));
+#endif
+    }
 
     // 2. Step the Amiga quadrature state machine at microsecond intervals
     amigaMouse.update();
