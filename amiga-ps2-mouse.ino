@@ -49,7 +49,7 @@ static constexpr uint16_t LED_BLINK_INTERVAL_MS = 80;
 
 // Non-blocking artificial cursor jiggle state machine (N x Up/Down or Left/Right pairs)
 static uint8_t  s_wiggleLegIndex   = 0;
-static uint8_t  s_wiggleTotalLegs  = 0; // 2 * pairs
+static uint8_t  s_wiggleTotalLegs  = 0; // pairs * 2 * WIGGLE_STEPS_PER_DIRECTION
 static bool     s_wiggleVertical   = true; // true = Up/Down, false = Left/Right
 static uint32_t s_wiggleLegStartMs = 0;
 
@@ -82,12 +82,12 @@ static void startCursorJiggle(uint8_t pairs, bool vertical) {
     if (pairs == 0) {
         return;
     }
-    s_wiggleTotalLegs  = pairs * 2;
+    s_wiggleTotalLegs  = pairs * 2 * WIGGLE_STEPS_PER_DIRECTION;
     s_wiggleLegIndex   = 0;
     s_wiggleVertical   = vertical;
     s_wiggleLegStartMs = millis();
 
-    // First leg: UP (dy = -WIGGLE_STEP_DELTA) if vertical, or LEFT (dx = -WIGGLE_STEP_DELTA) if horizontal
+    // First step: UP (dy = -WIGGLE_STEP_DELTA) if vertical, or LEFT (dx = -WIGGLE_STEP_DELTA) if horizontal
     if (vertical) {
         amigaMouse.queueRawSteps(0, -WIGGLE_STEP_DELTA);
     } else {
@@ -95,8 +95,9 @@ static void startCursorJiggle(uint8_t pairs, bool vertical) {
     }
 #if ENABLE_SERIAL_DEBUG
     if (s_verboseDebug) {
-        Serial.printf("[AmigaMouse] Artificial jiggle pair 1/%u %s (%ld steps)\n",
+        Serial.printf("[AmigaMouse] Artificial jiggle pair 1/%u step 1/%u %s (%ld steps)\n",
                       pairs,
+                      static_cast<unsigned>(WIGGLE_STEPS_PER_DIRECTION),
                       vertical ? "UP" : "LEFT",
                       static_cast<long>(-WIGGLE_STEP_DELTA));
     }
@@ -107,10 +108,13 @@ static void updateCursorJiggle() {
     if (s_wiggleLegIndex >= s_wiggleTotalLegs) {
         return;
     }
-    // Wait WIGGLE_LEG_DURATION_MS (>= 1 VBlank) after first leg (Up/Left),
-    // and WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS after second leg (Down/Right) before next pair.
-    bool isSecondLeg = ((s_wiggleLegIndex & 0x01) != 0);
-    uint32_t waitMs = isSecondLeg ? (WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS)
+    static constexpr uint8_t LEGS_PER_PAIR = 2 * WIGGLE_STEPS_PER_DIRECTION;
+    uint8_t legInPair = s_wiggleLegIndex % LEGS_PER_PAIR;
+    bool isEndOfPair  = (legInPair == (LEGS_PER_PAIR - 1));
+
+    // Wait WIGGLE_LEG_DURATION_MS (>= 1 VBlank) after each step within a pair,
+    // and WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS after the last step of a pair.
+    uint32_t waitMs = isEndOfPair ? (WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS)
                                   : WIGGLE_LEG_DURATION_MS;
 
     uint32_t nowMs = millis();
@@ -119,9 +123,10 @@ static void updateCursorJiggle() {
         amigaMouse.getPendingY() == 0) {
         s_wiggleLegIndex++;
         if (s_wiggleLegIndex < s_wiggleTotalLegs) {
-            bool firstInPair = ((s_wiggleLegIndex & 0x01) == 0);
-            int32_t delta = firstInPair ? -WIGGLE_STEP_DELTA : +WIGGLE_STEP_DELTA;
-            s_wiggleLegStartMs = nowMs;
+            uint8_t nextLegInPair = s_wiggleLegIndex % LEGS_PER_PAIR;
+            bool firstDirection   = (nextLegInPair < WIGGLE_STEPS_PER_DIRECTION);
+            int32_t delta         = firstDirection ? -WIGGLE_STEP_DELTA : +WIGGLE_STEP_DELTA;
+            s_wiggleLegStartMs    = nowMs;
             if (s_wiggleVertical) {
                 amigaMouse.queueRawSteps(0, delta);
             } else {
@@ -129,11 +134,14 @@ static void updateCursorJiggle() {
             }
 #if ENABLE_SERIAL_DEBUG
             if (s_verboseDebug) {
-                const char *dirName = s_wiggleVertical ? (firstInPair ? "UP" : "DOWN")
-                                                       : (firstInPair ? "LEFT" : "RIGHT");
-                Serial.printf("[AmigaMouse] Artificial jiggle pair %u/%u %s (%+ld steps)\n",
-                              (s_wiggleLegIndex / 2) + 1,
-                              s_wiggleTotalLegs / 2,
+                const char *dirName = s_wiggleVertical ? (firstDirection ? "UP" : "DOWN")
+                                                       : (firstDirection ? "LEFT" : "RIGHT");
+                uint8_t stepInDir   = (nextLegInPair % WIGGLE_STEPS_PER_DIRECTION) + 1;
+                Serial.printf("[AmigaMouse] Artificial jiggle pair %u/%u step %u/%u %s (%+ld steps)\n",
+                              (s_wiggleLegIndex / LEGS_PER_PAIR) + 1,
+                              s_wiggleTotalLegs / LEGS_PER_PAIR,
+                              stepInDir,
+                              static_cast<unsigned>(WIGGLE_STEPS_PER_DIRECTION),
                               dirName,
                               static_cast<long>(delta));
             }

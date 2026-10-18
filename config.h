@@ -88,9 +88,12 @@
 #define AMIGA_DEFAULT_SWAP_BUTTONS  1
 
 // Sensitivity feedback cursor wiggle parameters:
-// Each Up/Down or Left/Right pair uses WIGGLE_LEG_DURATION_MS per leg (>= 1 PAL/NTSC VBlank = 25 ms),
-// with WIGGLE_PAIR_PAUSE_MS pause between consecutive pairs.
+// Each Up/Down or Left/Right pair sends WIGGLE_STEP_DELTA WIGGLE_STEPS_PER_DIRECTION
+// times in the first direction, then WIGGLE_STEPS_PER_DIRECTION times in the opposite
+// direction (spaced by WIGGLE_LEG_DURATION_MS >= 1 VBlank), with WIGGLE_PAIR_PAUSE_MS
+// pause between consecutive pairs.
 #define WIGGLE_STEP_DELTA           16
+#define WIGGLE_STEPS_PER_DIRECTION  2
 #define WIGGLE_LEG_DURATION_MS      25
 #define WIGGLE_PAIR_PAUSE_MS        250
 
