@@ -26,12 +26,13 @@ static AmigaMouse amigaMouse(
 );
 
 // Button chord detection for on-the-fly DPI / sensitivity switching
-static uint32_t s_chordStartMs = 0;
+static uint32_t s_chordStartMs   = 0;
 static bool     s_chordTriggered = false;
-static bool     s_verboseDebug = (ENABLE_USB_VERBOSE_DEBUG != 0);
-static bool     s_prevLeft = false;
-static bool     s_prevRight = false;
-static bool     s_prevMiddle = false;
+static bool     s_allButtonsHeld = false;
+static bool     s_verboseDebug   = (ENABLE_USB_VERBOSE_DEBUG != 0);
+static bool     s_prevLeft       = false;
+static bool     s_prevRight      = false;
+static bool     s_prevMiddle     = false;
 
 static void blinkStatusLed(uint8_t count, uint16_t onMs = 80, uint16_t offMs = 80) {
     for (uint8_t i = 0; i < count; i++) {
@@ -180,25 +181,34 @@ void loop() {
         }
 #endif
 
-        // Check for 3-button sensitivity preset chord (LMB + RMB + MMB held for 1 second)
-        if (packet.leftButton && packet.rightButton && packet.middleButton &&
-            packet.dx == 0 && packet.dy == 0) {
-            if (s_chordStartMs == 0) {
+        // Track 3-button sensitivity preset chord state (LMB + RMB + MMB)
+        bool allThree = packet.leftButton && packet.rightButton && packet.middleButton;
+        if (allThree) {
+            // Reset hold timer if mouse is actively dragged (> 4 counts) while holding buttons
+            if (abs(packet.dx) > 4 || abs(packet.dy) > 4) {
+                s_chordStartMs = millis();
+            } else if (!s_allButtonsHeld) {
                 s_chordStartMs = millis();
                 s_chordTriggered = false;
-            } else if (!s_chordTriggered && (millis() - s_chordStartMs) >= 1000) {
-                s_chordTriggered = true;
-                amigaMouse.cycleSensitivityPreset();
-                uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
-#if ENABLE_SERIAL_DEBUG
-                Serial.printf("[AmigaMouse] Sensitivity preset cycled to #%u\n", presetNum);
-#endif
-                blinkStatusLed(presetNum);
             }
+            s_allButtonsHeld = true;
         } else {
+            s_allButtonsHeld = false;
             s_chordStartMs = 0;
             s_chordTriggered = false;
         }
+    }
+
+    // Check 1-second 3-button hold timer continuously in loop() because a PS/2
+    // mouse in Stream Mode sends no packets while stationary with buttons held.
+    if (s_allButtonsHeld && !s_chordTriggered && (millis() - s_chordStartMs) >= 1000) {
+        s_chordTriggered = true;
+        amigaMouse.cycleSensitivityPreset();
+        uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
+#if ENABLE_SERIAL_DEBUG
+        Serial.printf("[AmigaMouse] Sensitivity preset cycled to #%u\n", presetNum);
+#endif
+        blinkStatusLed(presetNum);
     }
 
     // 2. Step the Amiga quadrature state machine at microsecond intervals
