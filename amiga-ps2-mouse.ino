@@ -28,6 +28,7 @@ static AmigaMouse amigaMouse(
 // Button chord detection for on-the-fly DPI / sensitivity switching
 static uint32_t s_chordStartMs = 0;
 static bool     s_chordTriggered = false;
+static bool     s_logPackets = false;
 
 static void blinkStatusLed(uint8_t count, uint16_t onMs = 80, uint16_t offMs = 80) {
     for (uint8_t i = 0; i < count; i++) {
@@ -68,6 +69,11 @@ static void handleSerialCommands() {
             case '5':
                 amigaMouse.setScaling(2, 1);
                 Serial.println(F("[AmigaMouse] Sensitivity set to 200% (2:1)"));
+                break;
+            case 'p':
+            case 'P':
+                s_logPackets = !s_logPackets;
+                Serial.printf("[PS2Mouse] Packet logging %s\n", s_logPackets ? "ENABLED" : "DISABLED");
                 break;
             case 'r':
             case 'R':
@@ -142,6 +148,19 @@ void loop() {
     PS2MousePacket packet;
     if (ps2Mouse.poll(packet)) {
         amigaMouse.processPs2Packet(packet);
+
+#if ENABLE_SERIAL_DEBUG
+        if (s_logPackets) {
+            Serial.printf("[Pkt #%lu] dx=%4d dy=%4d | L=%d R=%d M=%d | Err=%lu\n",
+                          static_cast<unsigned long>(ps2Mouse.getPacketCount()),
+                          packet.dx,
+                          packet.dy,
+                          packet.leftButton ? 1 : 0,
+                          packet.rightButton ? 1 : 0,
+                          packet.middleButton ? 1 : 0,
+                          static_cast<unsigned long>(ps2Mouse.getErrorCount()));
+        }
+#endif
 
         // Check for 3-button sensitivity preset chord (LMB + RMB + MMB held for 1 second)
         if (packet.leftButton && packet.rightButton && packet.middleButton &&

@@ -61,13 +61,14 @@ private:
     volatile bool     _parityOk;
     volatile uint32_t _lastEdgeUs;
     volatile bool     _rxEnabled;
+    volatile bool     _rxFrameError;
     volatile uint32_t _errorCount;
 
     // Packet assembly state
     uint8_t  _packetBuf[4];
     uint8_t  _packetIndex;
     uint8_t  _packetSize;
-    uint32_t _lastPacketByteMs;
+    uint32_t _lastPacketByteUs;
     uint32_t _lastActivityMs;
     uint32_t _lastWatchdogMs;
     uint32_t _packetCount;

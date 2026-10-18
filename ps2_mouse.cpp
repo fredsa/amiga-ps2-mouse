@@ -35,10 +35,11 @@ PS2Mouse::PS2Mouse(uint8_t clkPin, uint8_t dataPin)
       _parityOk(false),
       _lastEdgeUs(0),
       _rxEnabled(false),
+      _rxFrameError(false),
       _errorCount(0),
       _packetIndex(0),
       _packetSize(3),
-      _lastPacketByteMs(0),
+      _lastPacketByteUs(0),
       _lastActivityMs(0),
       _lastWatchdogMs(0),
       _packetCount(0),
@@ -72,11 +73,34 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
         return;
     }
 
+    // Verify CLK is actually LOW. On a genuine PS/2 falling edge, CLK remains
+    // LOW for 30-50 us. False triggers from slow level-shifter rising edges or
+    // crosstalk spikes (e.g. DATA or adjacent GPIO transitions) read HIGH.
+    if (digitalRead(_clkPin) != LOW) {
+        return;
+    }
+    delayMicroseconds(2);
+    if (digitalRead(_clkPin) != LOW) {
+        return;
+    }
+
     uint32_t nowUs = micros();
+    uint32_t dtUs  = nowUs - _lastEdgeUs;
+
+    // Reject switch bounce / ringing (< 35 us; valid PS/2 clock period is 60-100 us)
+    if (dtUs < PS2_MIN_CLOCK_PERIOD_US) {
+        return;
+    }
+
     uint8_t dataBit = digitalRead(_dataPin) ? 1 : 0;
 
     // Reset frame state machine if too much time elapsed since the last clock edge
-    if ((nowUs - _lastEdgeUs) > PS2_FRAME_TIMEOUT_US) {
+    if (dtUs > PS2_FRAME_TIMEOUT_US) {
+        if (_bitIndex != 0) {
+            // Previous 11-bit frame was incomplete; abort any partial packet
+            _errorCount++;
+            _rxFrameError = true;
+        }
         _bitIndex = 0;
         _incomingByte = 0;
         _parityCount = 0;
@@ -92,6 +116,7 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
             _bitIndex = 1;
         } else {
             _errorCount++;
+            _rxFrameError = true;
         }
     } else if (_bitIndex >= 1 && _bitIndex <= 8) {
         // Bits 1..8: Data bits (LSB first)
@@ -113,9 +138,11 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
                 _rxHead = nextHead;
             } else {
                 _errorCount++;
+                _rxFrameError = true;
             }
         } else {
             _errorCount++;
+            _rxFrameError = true;
         }
         _bitIndex = 0;
     }
@@ -144,6 +171,7 @@ bool PS2Mouse::waitByte(uint8_t &outByte, uint32_t timeoutMs) {
 void PS2Mouse::clearRxBuffer() {
     _rxTail = _rxHead;
     _packetIndex = 0;
+    _rxFrameError = false;
 }
 
 bool PS2Mouse::sendByte(uint8_t data) {
@@ -178,6 +206,7 @@ bool PS2Mouse::sendByte(uint8_t data) {
         if (!waitLineState(_clkPin, LOW, timeoutUs)) {
             releaseLine(_dataPin);
             releaseLine(_clkPin);
+            _lastEdgeUs = micros() - 1000;
             _rxEnabled = true;
             return false;
         }
@@ -192,6 +221,7 @@ bool PS2Mouse::sendByte(uint8_t data) {
         if (!waitLineState(_clkPin, HIGH, 2500)) {
             releaseLine(_dataPin);
             releaseLine(_clkPin);
+            _lastEdgeUs = micros() - 1000;
             _rxEnabled = true;
             return false;
         }
@@ -201,6 +231,7 @@ bool PS2Mouse::sendByte(uint8_t data) {
     if (!waitLineState(_clkPin, LOW, 2500)) {
         releaseLine(_dataPin);
         releaseLine(_clkPin);
+        _lastEdgeUs = micros() - 1000;
         _rxEnabled = true;
         return false;
     }
@@ -212,6 +243,7 @@ bool PS2Mouse::sendByte(uint8_t data) {
     if (!waitLineState(_clkPin, HIGH, 2500)) {
         releaseLine(_dataPin);
         releaseLine(_clkPin);
+        _lastEdgeUs = micros() - 1000;
         _rxEnabled = true;
         return false;
     }
@@ -220,21 +252,25 @@ bool PS2Mouse::sendByte(uint8_t data) {
     if (!waitLineState(_clkPin, LOW, 2500)) {
         releaseLine(_dataPin);
         releaseLine(_clkPin);
+        _lastEdgeUs = micros() - 1000;
         _rxEnabled = true;
         return false;
     }
     releaseLine(_dataPin);
     if (!waitLineState(_clkPin, HIGH, 2500)) {
+        _lastEdgeUs = micros() - 1000;
         _rxEnabled = true;
         return false;
     }
 
     // 7. Wait for mouse to pull DATA low and CLK low (ACK bit)
     if (!waitLineState(_dataPin, LOW, 5000)) {
+        _lastEdgeUs = micros() - 1000;
         _rxEnabled = true;
         return false;
     }
     if (!waitLineState(_clkPin, LOW, 2500)) {
+        _lastEdgeUs = micros() - 1000;
         _rxEnabled = true;
         return false;
     }
@@ -245,7 +281,8 @@ bool PS2Mouse::sendByte(uint8_t data) {
 
     // Re-enable interrupt receiver immediately so the 0xFA ACK byte is captured
     _bitIndex = 0;
-    _lastEdgeUs = micros();
+    _rxFrameError = false;
+    _lastEdgeUs = micros() - 1000;
     _rxEnabled = true;
     return true;
 }
@@ -328,6 +365,10 @@ bool PS2Mouse::resetDevice() {
 }
 
 bool PS2Mouse::configureDevice() {
+    _deviceId = 0x00;
+    _hasWheel = false;
+    _packetSize = 3;
+
     // Attempt a full reset first; if the mouse doesn't respond to 0xFF,
     // fall back to Set Defaults (0xF6) for clones that skip BAT.
     if (!resetDevice()) {
@@ -337,10 +378,10 @@ bool PS2Mouse::configureDevice() {
         }
     }
 
-    // Detect if mouse supports IntelliMouse 4-byte protocol (for scroll wheel / 3rd button)
-    tryEnableIntelliMouse();
-
-    // Configure 1:1 linear scaling, resolution, and sample rate
+    // Keep mouse in standard 3-byte PS/2 mode (Device ID 0x00).
+    // Standard 3-byte packets already report all 3 buttons (LMB, RMB, MMB) in
+    // Byte 0, and avoiding 4-byte IntelliMouse mode eliminates 3-vs-4 byte
+    // packet size mismatches across clones while reducing bus traffic by 25%.
     sendCommand(PS2_CMD_SET_SCALING_1_1);
     setResolution(PS2_DEFAULT_RESOLUTION);
     setSampleRate(PS2_DEFAULT_SAMPLE_RATE);
@@ -354,6 +395,7 @@ bool PS2Mouse::configureDevice() {
     clearRxBuffer();
     _connected = true;
     _lastActivityMs = millis();
+    _lastPacketByteUs = micros();
     return true;
 }
 
@@ -364,6 +406,7 @@ bool PS2Mouse::begin() {
     releaseLine(_dataPin);
     delay(50);
 
+    _lastEdgeUs = micros() - 1000;
     _rxEnabled = true;
     attachInterrupt(digitalPinToInterrupt(_clkPin), ps2ClockIsrTrampoline, FALLING);
 
@@ -376,19 +419,32 @@ bool PS2Mouse::begin() {
 
 bool PS2Mouse::poll(PS2MousePacket &outPacket) {
     uint8_t b = 0;
-    uint32_t nowMs = millis();
 
-    // If partial packet bytes were received long ago (> 50 ms), discard stale partial packet
-    if (_packetIndex > 0 && (nowMs - _lastPacketByteMs) > 50) {
+    // If the ISR detected any framing/parity error, discard any partial packet
+    if (_rxFrameError) {
+        _rxFrameError = false;
         _packetIndex = 0;
     }
 
     while (readByteFromBuffer(b)) {
-        _lastPacketByteMs = nowMs;
+        uint32_t nowUs = micros();
+        uint32_t nowMs = millis();
+
+        // Bytes within the same packet arrive ~1 ms apart, whereas consecutive
+        // packets are ~10 ms apart (at 100 Hz). Any gap > 3.5 ms means a new
+        // packet is starting, so discard any stale partial packet bytes.
+        if (_packetIndex > 0 && (nowUs - _lastPacketByteUs) > PS2_PACKET_TIMEOUT_US) {
+            _packetIndex = 0;
+        }
+        _lastPacketByteUs = nowUs;
+
+        uint32_t idleMs = nowMs - _lastActivityMs;
         _lastActivityMs = nowMs;
 
-        // Detect hot-plug self-test completion (0xAA followed by 0x00) when at packet boundary
-        if (_packetIndex == 0 && b == PS2_RESP_BAT_OK) {
+        // Detect hot-plug self-test completion (0xAA followed by 0x00) only after
+        // the bus has been idle (> 500 ms), so a movement byte of 0xAA (-86)
+        // during active movement is never mistaken for a reset.
+        if (_packetIndex == 0 && b == PS2_RESP_BAT_OK && idleMs > 500) {
             uint8_t nextByte = 0;
             if (waitByte(nextByte, 50) && nextByte == 0x00) {
                 configureDevice();
@@ -396,10 +452,14 @@ bool PS2Mouse::poll(PS2MousePacket &outPacket) {
             }
         }
 
-        // Byte 0 of a standard PS/2 mouse packet MUST have bit 3 (0x08) set to 1
-        if (_packetIndex == 0 && ((b & 0x08) == 0)) {
+        // Validate Byte 0 (header/state byte):
+        // - Bit 3 (0x08) MUST be 1 on all standard PS/2 packets.
+        // - Bits 6 & 7 (0xC0, X/Y overflow) must be 0. Rejecting 0xC0 != 0 at
+        //   Byte 0 prevents negative movement deltas (-1..-128 = 0x80..0xFF)
+        //   from ever being mistaken for a header byte if a byte was dropped.
+        if (_packetIndex == 0 && ((b & 0x08) == 0 || (b & 0xC0) != 0)) {
             _errorCount++;
-            continue; // Re-synchronize stream until a valid header byte arrives
+            continue;
         }
 
         _packetBuf[_packetIndex++] = b;
@@ -422,14 +482,6 @@ bool PS2Mouse::poll(PS2MousePacket &outPacket) {
             // Reconstruct 9-bit signed two's complement X and Y deltas
             int16_t dx = static_cast<int16_t>(rawX) - ((state & 0x10) ? 256 : 0);
             int16_t dy = static_cast<int16_t>(rawY) - ((state & 0x20) ? 256 : 0);
-
-            // Clamp on hardware overflow
-            if (outPacket.xOverflow) {
-                dx = (state & 0x10) ? -255 : 255;
-            }
-            if (outPacket.yOverflow) {
-                dy = (state & 0x20) ? -255 : 255;
-            }
 
             outPacket.dx = dx;
             outPacket.dy = dy;

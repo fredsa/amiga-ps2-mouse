@@ -8,7 +8,7 @@ This project was authored by AI with human prompting and feedback.
 
 ## Project Structure
 
-- [`amiga-ps2-mouse-agy.ino`](amiga-ps2-mouse-agy.ino) — Main Arduino sketch (`setup()` and `loop()`), sensitivity preset switching, and serial diagnostics.
+- [`amiga-ps2-mouse.ino`](amiga-ps2-mouse.ino) — Main Arduino sketch (`setup()` and `loop()`), sensitivity preset switching, and serial diagnostics.
 - [`config.h`](config.h) — GPIO pin mapping for the `ESP32S3 Dev Module`, PS/2 sample rate/resolution settings, and Amiga quadrature timing constants.
 - [`ps2_mouse.h`](ps2_mouse.h) / [`ps2_mouse.cpp`](ps2_mouse.cpp) — Interrupt-driven PS/2 host controller supporting Host-to-Device commands, 11-bit frame reception, sync validation, and hot-plug recovery.
 - [`amiga_mouse.h`](amiga_mouse.h) / [`amiga_mouse.cpp`](amiga_mouse.cpp) — Non-blocking microsecond-paced 2-bit Gray-code quadrature generator and open-drain button driver tailored to the Amiga 1000 (`Denise` 8362 `JOY0DAT` & `CIA-A`/`Paula`).
@@ -55,7 +55,7 @@ The Amiga 1000 Mouse Port (Port 1) uses a standard DE-9 male connector on the co
 ## Building and Flashing (Arduino IDE)
 
 1. Install **Arduino IDE 2.x** and the **esp32 by Espressif Systems** board package via Boards Manager.
-2. Open [`amiga-ps2-mouse-agy.ino`](amiga-ps2-mouse-agy.ino).
+2. Open [`amiga-ps2-mouse.ino`](amiga-ps2-mouse.ino).
 3. Select **Tools -> Board -> esp32 -> ESP32S3 Dev Module**.
 4. Recommended Board Settings:
    - **USB CDC On Boot**: `Enabled` (for Serial diagnostics over native USB)

@@ -41,9 +41,19 @@
 // Resolution code: 0 = 1 count/mm, 1 = 2 counts/mm, 2 = 4 counts/mm, 3 = 8 counts/mm
 #define PS2_DEFAULT_RESOLUTION  2
 
-// Frame bit timeout (microseconds): if clock edges stop for longer than this,
-// reset the bit state machine to recover from noise or partial transfers.
-#define PS2_FRAME_TIMEOUT_US    2500
+// Minimum valid PS/2 clock period (microseconds): PS/2 clock is 10-16.7 kHz
+// (60-100 us period). Edges closer than 35 us are bounce or crosstalk glitches.
+#define PS2_MIN_CLOCK_PERIOD_US 35
+
+// Intra-byte bit timeout (microseconds): if clock edges stop for longer than
+// this within a single 11-bit byte, reset the bit state machine before the next
+// byte in the packet arrives (inter-byte gap is typically 150-400 us).
+#define PS2_FRAME_TIMEOUT_US    250
+
+// Inter-packet byte timeout (microseconds): bytes within a 3-byte packet arrive
+// ~1 ms apart, whereas packets arrive 10 ms apart (at 100 Hz). Any gap > 3.5 ms
+// indicates the start of a new packet.
+#define PS2_PACKET_TIMEOUT_US   3500
 
 // Periodic watchdog interval (milliseconds): check if the PS/2 lines are stuck
 // or if a mouse was hot-plugged.
