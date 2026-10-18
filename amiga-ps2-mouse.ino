@@ -25,14 +25,21 @@ static AmigaMouse amigaMouse(
     PIN_AMIGA_MMB
 );
 
-// Button chord detection for on-the-fly DPI / sensitivity switching
-static uint32_t s_chordStartMs   = 0;
-static bool     s_chordTriggered = false;
-static bool     s_allButtonsHeld = false;
-static bool     s_verboseDebug   = (ENABLE_USB_VERBOSE_DEBUG != 0);
-static bool     s_prevLeft       = false;
-static bool     s_prevRight      = false;
-static bool     s_prevMiddle     = false;
+// Configuration mode state machine triggered by holding LMB + RMB + MMB for 1 second
+enum ConfigState : uint8_t {
+    CFG_IDLE = 0,
+    CFG_WAIT_RELEASE_ALL,   // Waiting for all 3 buttons to be released after entering config mode
+    CFG_WAIT_SINGLE_CLICK,  // Waiting for Left (decrease), Right (increase), or Middle (swap L/R) click
+    CFG_WAIT_CLICK_RELEASE  // Waiting for the single clicked button to be released before resuming
+};
+
+static ConfigState s_configState    = CFG_IDLE;
+static uint32_t    s_chordStartMs   = 0;
+static bool        s_allButtonsHeld = false;
+static bool        s_verboseDebug   = (ENABLE_USB_VERBOSE_DEBUG != 0);
+static bool        s_prevLeft       = false;
+static bool        s_prevRight      = false;
+static bool        s_prevMiddle     = false;
 
 // Non-blocking status LED blink state machine
 static uint8_t  s_ledBlinksRemaining = 0;
@@ -40,9 +47,10 @@ static bool     s_ledState           = false;
 static uint32_t s_ledLastToggleMs    = 0;
 static constexpr uint16_t LED_BLINK_INTERVAL_MS = 80;
 
-// Non-blocking artificial cursor wiggle state machine (N x Left+Right pairs)
+// Non-blocking artificial cursor jiggle state machine (N x Up/Down or Left/Right pairs)
 static uint8_t  s_wiggleLegIndex   = 0;
-static uint8_t  s_wiggleTotalLegs  = 0; // 2 * presetNum (Left + Right per pair)
+static uint8_t  s_wiggleTotalLegs  = 0; // 2 * pairs
+static bool     s_wiggleVertical   = true; // true = Up/Down, false = Left/Right
 static uint32_t s_wiggleLegStartMs = 0;
 
 static void startStatusLedBlink(uint8_t count) {
@@ -70,48 +78,64 @@ static void updateStatusLedBlink() {
     }
 }
 
-static void startCursorWiggle(uint8_t pairs) {
+static void startCursorJiggle(uint8_t pairs, bool vertical) {
     if (pairs == 0) {
         return;
     }
-    s_wiggleTotalLegs = pairs * 2;
-    s_wiggleLegIndex = 0;
+    s_wiggleTotalLegs  = pairs * 2;
+    s_wiggleLegIndex   = 0;
+    s_wiggleVertical   = vertical;
     s_wiggleLegStartMs = millis();
 
-    amigaMouse.queueRawSteps(-WIGGLE_STEP_DELTA, 0);
+    // First leg: UP (dy = -WIGGLE_STEP_DELTA) if vertical, or LEFT (dx = -WIGGLE_STEP_DELTA) if horizontal
+    if (vertical) {
+        amigaMouse.queueRawSteps(0, -WIGGLE_STEP_DELTA);
+    } else {
+        amigaMouse.queueRawSteps(-WIGGLE_STEP_DELTA, 0);
+    }
 #if ENABLE_SERIAL_DEBUG
     if (s_verboseDebug) {
-        Serial.printf("[AmigaMouse] Artificial wiggle pair 1/%u LEFT (%ld steps)\n",
+        Serial.printf("[AmigaMouse] Artificial jiggle pair 1/%u %s (%ld steps)\n",
                       pairs,
+                      vertical ? "UP" : "LEFT",
                       static_cast<long>(-WIGGLE_STEP_DELTA));
     }
 #endif
 }
 
-static void updateCursorWiggle() {
+static void updateCursorJiggle() {
     if (s_wiggleLegIndex >= s_wiggleTotalLegs) {
         return;
     }
-    // Wait WIGGLE_LEG_DURATION_MS (>= 1 VBlank) after Left leg,
-    // and WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS after Right leg before next pair.
-    bool isRightLeg = ((s_wiggleLegIndex & 0x01) != 0);
-    uint32_t waitMs = isRightLeg ? (WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS)
-                                 : WIGGLE_LEG_DURATION_MS;
+    // Wait WIGGLE_LEG_DURATION_MS (>= 1 VBlank) after first leg (Up/Left),
+    // and WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS after second leg (Down/Right) before next pair.
+    bool isSecondLeg = ((s_wiggleLegIndex & 0x01) != 0);
+    uint32_t waitMs = isSecondLeg ? (WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS)
+                                  : WIGGLE_LEG_DURATION_MS;
 
     uint32_t nowMs = millis();
-    if ((nowMs - s_wiggleLegStartMs) >= waitMs && amigaMouse.getPendingX() == 0) {
+    if ((nowMs - s_wiggleLegStartMs) >= waitMs &&
+        amigaMouse.getPendingX() == 0 &&
+        amigaMouse.getPendingY() == 0) {
         s_wiggleLegIndex++;
         if (s_wiggleLegIndex < s_wiggleTotalLegs) {
-            int32_t dx = ((s_wiggleLegIndex & 0x01) == 0) ? -WIGGLE_STEP_DELTA : +WIGGLE_STEP_DELTA;
+            bool firstInPair = ((s_wiggleLegIndex & 0x01) == 0);
+            int32_t delta = firstInPair ? -WIGGLE_STEP_DELTA : +WIGGLE_STEP_DELTA;
             s_wiggleLegStartMs = nowMs;
-            amigaMouse.queueRawSteps(dx, 0);
+            if (s_wiggleVertical) {
+                amigaMouse.queueRawSteps(0, delta);
+            } else {
+                amigaMouse.queueRawSteps(delta, 0);
+            }
 #if ENABLE_SERIAL_DEBUG
             if (s_verboseDebug) {
-                Serial.printf("[AmigaMouse] Artificial wiggle pair %u/%u %s (%+ld steps)\n",
+                const char *dirName = s_wiggleVertical ? (firstInPair ? "UP" : "DOWN")
+                                                       : (firstInPair ? "LEFT" : "RIGHT");
+                Serial.printf("[AmigaMouse] Artificial jiggle pair %u/%u %s (%+ld steps)\n",
                               (s_wiggleLegIndex / 2) + 1,
                               s_wiggleTotalLegs / 2,
-                              (dx < 0) ? "LEFT" : "RIGHT",
-                              static_cast<long>(dx));
+                              dirName,
+                              static_cast<long>(delta));
             }
 #endif
         }
@@ -124,35 +148,43 @@ static void handleSerialCommands() {
         char ch = static_cast<char>(Serial.read());
         switch (ch) {
             case '1':
-                amigaMouse.setScaling(1, 2);
+                amigaMouse.setSensitivityPresetIndex(0);
                 Serial.println(F("[AmigaMouse] Sensitivity set to #1: 50% (1:2)"));
-                startCursorWiggle(1);
+                startCursorJiggle(1, true);
                 startStatusLedBlink(1);
                 break;
             case '2':
-                amigaMouse.setScaling(3, 4);
+                amigaMouse.setSensitivityPresetIndex(1);
                 Serial.println(F("[AmigaMouse] Sensitivity set to #2: 75% (3:4)"));
-                startCursorWiggle(2);
+                startCursorJiggle(2, true);
                 startStatusLedBlink(2);
                 break;
             case '3':
-                amigaMouse.setScaling(1, 1);
+                amigaMouse.setSensitivityPresetIndex(2);
                 Serial.println(F("[AmigaMouse] Sensitivity set to #3: 100% (1:1)"));
-                startCursorWiggle(3);
+                startCursorJiggle(3, true);
                 startStatusLedBlink(3);
                 break;
             case '4':
-                amigaMouse.setScaling(3, 2);
+                amigaMouse.setSensitivityPresetIndex(3);
                 Serial.println(F("[AmigaMouse] Sensitivity set to #4: 150% (3:2)"));
-                startCursorWiggle(4);
+                startCursorJiggle(4, true);
                 startStatusLedBlink(4);
                 break;
             case '5':
-                amigaMouse.setScaling(2, 1);
+                amigaMouse.setSensitivityPresetIndex(4);
                 Serial.println(F("[AmigaMouse] Sensitivity set to #5: 200% (2:1)"));
-                startCursorWiggle(5);
+                startCursorJiggle(5, true);
                 startStatusLedBlink(5);
                 break;
+            case 'b':
+            case 'B': {
+                bool swapped = amigaMouse.toggleLeftRightSwapped();
+                Serial.printf("[AmigaMouse] Left/Right buttons swap %s\n", swapped ? "ENABLED" : "DISABLED");
+                startCursorJiggle(1, false);
+                startStatusLedBlink(1);
+                break;
+            }
             case 'v':
             case 'V':
             case 'p':
@@ -172,10 +204,11 @@ static void handleSerialCommands() {
             case 's':
             case 'S':
                 Serial.printf(
-                    "[Status] Connected=%d | DevID=0x%02X | Wheel=%d | Packets=%lu | Errors=%lu | Pending=(%ld,%ld) | Verbose=%d\n",
+                    "[Status] Connected=%d | DevID=0x%02X | Preset=#%u | SwapLR=%d | Packets=%lu | Errors=%lu | Pending=(%ld,%ld) | Verbose=%d\n",
                     ps2Mouse.isConnected() ? 1 : 0,
                     ps2Mouse.getDeviceId(),
-                    ps2Mouse.hasScrollWheel() ? 1 : 0,
+                    amigaMouse.getSensitivityPresetIndex() + 1,
+                    amigaMouse.isLeftRightSwapped() ? 1 : 0,
                     static_cast<unsigned long>(ps2Mouse.getPacketCount()),
                     static_cast<unsigned long>(ps2Mouse.getErrorCount()),
                     static_cast<long>(amigaMouse.getPendingX()),
@@ -210,8 +243,9 @@ void setup() {
     Serial.printf(" PS/2 Pins  : CLK=GPIO%d, DATA=GPIO%d\n", PIN_PS2_CLK, PIN_PS2_DATA);
     Serial.printf(" Amiga Quad : V=GPIO%d, H=GPIO%d, VQ=GPIO%d, HQ=GPIO%d\n",
                   PIN_AMIGA_V_PULSE, PIN_AMIGA_H_PULSE, PIN_AMIGA_VQ_PULSE, PIN_AMIGA_HQ_PULSE);
-    Serial.printf(" Amiga Btns : LMB=GPIO%d, RMB=GPIO%d, MMB=GPIO%d\n",
-                  PIN_AMIGA_LMB, PIN_AMIGA_RMB, PIN_AMIGA_MMB);
+    Serial.printf(" Amiga Btns : LMB=GPIO%d, RMB=GPIO%d, MMB=GPIO%d (SwapLR=%s)\n",
+                  PIN_AMIGA_LMB, PIN_AMIGA_RMB, PIN_AMIGA_MMB,
+                  amigaMouse.isLeftRightSwapped() ? "ON" : "OFF");
     Serial.printf(" USB Verbose: %s (press 'v' in Serial Monitor to toggle)\n",
                   s_verboseDebug ? "ENABLED" : "DISABLED");
 #endif
@@ -235,14 +269,6 @@ void loop() {
     // 1. Poll for complete PS/2 movement & button packets
     PS2MousePacket packet;
     if (ps2Mouse.poll(packet)) {
-        // If user moves the mouse while the artificial wiggle is still playing,
-        // cancel the remaining wiggle legs immediately so real movement is crisp.
-        if (s_wiggleLegIndex < s_wiggleTotalLegs && (abs(packet.dx) > 2 || abs(packet.dy) > 2)) {
-            s_wiggleLegIndex = s_wiggleTotalLegs;
-        }
-
-        amigaMouse.processPs2Packet(packet);
-
 #if ENABLE_SERIAL_DEBUG
         if (s_verboseDebug) {
             bool btnChanged = (packet.leftButton != s_prevLeft) ||
@@ -252,7 +278,7 @@ void loop() {
             s_prevRight  = packet.rightButton;
             s_prevMiddle = packet.middleButton;
 
-            Serial.printf("[PS2 #%lu] dx=%4d dy=%4d | Btns: L=%d R=%d M=%d%s | AmigaPending=(%4ld,%4ld) | Err=%lu\n",
+            Serial.printf("[PS2 #%lu] dx=%4d dy=%4d | PhysBtns: L=%d R=%d M=%d%s | Cfg=%u | AmigaPending=(%4ld,%4ld) | Err=%lu\n",
                           static_cast<unsigned long>(ps2Mouse.getPacketCount()),
                           packet.dx,
                           packet.dy,
@@ -260,45 +286,107 @@ void loop() {
                           packet.rightButton ? 1 : 0,
                           packet.middleButton ? 1 : 0,
                           btnChanged ? " [BTN_CHG]" : "",
+                          static_cast<unsigned>(s_configState),
                           static_cast<long>(amigaMouse.getPendingX()),
                           static_cast<long>(amigaMouse.getPendingY()),
                           static_cast<unsigned long>(ps2Mouse.getErrorCount()));
         }
 #endif
 
-        // Track 3-button sensitivity preset chord state (LMB + RMB + MMB)
-        bool allThree = packet.leftButton && packet.rightButton && packet.middleButton;
-        if (allThree) {
-            // Reset hold timer if mouse is actively dragged (> 4 counts) while holding buttons
-            if (abs(packet.dx) > 4 || abs(packet.dy) > 4) {
-                s_chordStartMs = millis();
-            } else if (!s_allButtonsHeld) {
-                s_chordStartMs = millis();
-                s_chordTriggered = false;
+        if (s_configState == CFG_IDLE) {
+            // If user moves the mouse while a post-config feedback jiggle is still playing,
+            // cancel the remaining jiggle legs immediately so real movement is crisp.
+            if (s_wiggleLegIndex < s_wiggleTotalLegs && (abs(packet.dx) > 2 || abs(packet.dy) > 2)) {
+                s_wiggleLegIndex = s_wiggleTotalLegs;
             }
-            s_allButtonsHeld = true;
-        } else {
-            s_allButtonsHeld = false;
-            s_chordStartMs = 0;
-            s_chordTriggered = false;
+
+            amigaMouse.processPs2Packet(packet);
+
+            // Track 3-button configuration mode chord (physical LMB + RMB + MMB)
+            bool allThree = packet.leftButton && packet.rightButton && packet.middleButton;
+            if (allThree) {
+                if (abs(packet.dx) > 4 || abs(packet.dy) > 4) {
+                    s_chordStartMs = millis();
+                } else if (!s_allButtonsHeld) {
+                    s_chordStartMs = millis();
+                }
+                s_allButtonsHeld = true;
+            } else {
+                s_allButtonsHeld = false;
+                s_chordStartMs = 0;
+            }
+        } else if (s_configState == CFG_WAIT_RELEASE_ALL) {
+            // Ignore dx/dy and wait for all 3 physical buttons to be released
+            if (!packet.leftButton && !packet.rightButton && !packet.middleButton) {
+                s_configState = CFG_WAIT_SINGLE_CLICK;
+#if ENABLE_SERIAL_DEBUG
+                Serial.println(F("[ConfigMode] All buttons released. Waiting for single click (Left=-Sens, Right=+Sens, Middle=Toggle Swap)..."));
+#endif
+            }
+        } else if (s_configState == CFG_WAIT_SINGLE_CLICK) {
+            // Ignore dx/dy; check physical buttons directly (independent of swap mode)
+            if (packet.leftButton && !packet.rightButton && !packet.middleButton) {
+                amigaMouse.decreaseSensitivityPreset();
+                uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
+#if ENABLE_SERIAL_DEBUG
+                Serial.printf("[ConfigMode] Physical LEFT click -> Sensitivity preset #%u\n", presetNum);
+#endif
+                startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
+                startStatusLedBlink(presetNum);
+                s_configState = CFG_WAIT_CLICK_RELEASE;
+            } else if (packet.rightButton && !packet.leftButton && !packet.middleButton) {
+                amigaMouse.increaseSensitivityPreset();
+                uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
+#if ENABLE_SERIAL_DEBUG
+                Serial.printf("[ConfigMode] Physical RIGHT click -> Sensitivity preset #%u\n", presetNum);
+#endif
+                startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
+                startStatusLedBlink(presetNum);
+                s_configState = CFG_WAIT_CLICK_RELEASE;
+            } else if (packet.middleButton && !packet.leftButton && !packet.rightButton) {
+                bool swapped = amigaMouse.toggleLeftRightSwapped();
+#if ENABLE_SERIAL_DEBUG
+                Serial.printf("[ConfigMode] Physical MIDDLE click -> Swap Left/Right buttons = %s\n",
+                              swapped ? "ENABLED" : "DISABLED");
+#endif
+                startCursorJiggle(1, false); // Acknowledge with 1 Left/Right wiggle
+                startStatusLedBlink(1);
+                s_configState = CFG_WAIT_CLICK_RELEASE;
+            }
+        } else if (s_configState == CFG_WAIT_CLICK_RELEASE) {
+            // Wait for the clicked button to be released before returning to normal operation
+            if (!packet.leftButton && !packet.rightButton && !packet.middleButton) {
+                s_configState = CFG_IDLE;
+                s_allButtonsHeld = false;
+                s_chordStartMs = 0;
+#if ENABLE_SERIAL_DEBUG
+                Serial.println(F("[ConfigMode] Exited configuration mode."));
+#endif
+            }
         }
     }
 
     // Check 1-second 3-button hold timer continuously in loop() because a PS/2
     // mouse in Stream Mode sends no packets while stationary with buttons held.
-    if (s_allButtonsHeld && !s_chordTriggered && (millis() - s_chordStartMs) >= 1000) {
-        s_chordTriggered = true;
-        amigaMouse.cycleSensitivityPreset();
-        uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
+    if (s_configState == CFG_IDLE && s_allButtonsHeld && (millis() - s_chordStartMs) >= 1000) {
+        s_configState = CFG_WAIT_RELEASE_ALL;
+        s_allButtonsHeld = false;
+        s_chordStartMs = 0;
+
+        // Release Amiga buttons and clear any queued movement while in config mode
+        amigaMouse.setButtons(false, false, false);
+        amigaMouse.clearPendingSteps();
+
 #if ENABLE_SERIAL_DEBUG
-        Serial.printf("[AmigaMouse] Sensitivity preset cycled to #%u\n", presetNum);
+        Serial.println(F("[ConfigMode] Entered configuration mode! Release all 3 buttons, then click Left/Right/Middle."));
 #endif
-        startCursorWiggle(presetNum);
-        startStatusLedBlink(presetNum);
+        // Acknowledge entering configuration mode with 1 Up/Down jiggle
+        startCursorJiggle(1, true);
+        startStatusLedBlink(1);
     }
 
     // Advance non-blocking feedback animations
-    updateCursorWiggle();
+    updateCursorJiggle();
     updateStatusLedBlink();
 
     // 2. Step the Amiga quadrature state machine at microsecond intervals

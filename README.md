@@ -68,8 +68,13 @@ The Amiga 1000 Mouse Port (Port 1) uses a standard DE-9 male connector on the co
 ## Features & Operation
 
 - **Anti-Overflow Quadrature Pacing:** The Amiga `Denise` chip uses an 8-bit signed counter per axis (`JOY0DAT`, `-128` to `+127`) sampled once per 50 Hz PAL (20 ms) or 60 Hz NTSC (16.7 ms) vertical blanking interrupt. The driver adaptively paces quadrature transitions down to a minimum interval of `200 µs` (max 100 counts per 20 ms frame), preventing pointer reversal on fast mouse flicks.
-- **On-the-Fly Sensitivity Switching & USB Verbose Debugging:**
-  - Hold **Left + Middle + Right** mouse buttons simultaneously for **1 second** while stationary to cycle through 5 sensitivity presets (`50%`, `75%`, `100%`, `150%`, `200%`).
+- **Configuration Mode (Sensitivity & Left/Right Button Swap):**
+  - Physical Left and Right buttons are **swapped by default** (`AMIGA_DEFAULT_SWAP_BUTTONS = 1` in [`config.h`](config.h)).
+  - Hold **Left + Middle + Right** mouse buttons simultaneously for **1 second** to enter **Configuration Mode** (acknowledged by **1 Up/Down cursor jiggle**). While in configuration mode, mouse movement and clicks are not passed to the Amiga.
+  - Release all 3 buttons, then click a single physical button (always physical, regardless of swap mode):
+    - **Left Click**: Decrease sensitivity by 1 level (minimum `#1`), acknowledged by `N` **Up/Down** jiggles (`1`–`5`).
+    - **Right Click**: Increase sensitivity by 1 level (maximum `#5`), acknowledged by `N` **Up/Down** jiggles (`1`–`5`).
+    - **Middle Click**: Toggle the **Swap Left/Right Buttons** flag, acknowledged by **1 Left/Right** wiggle.
   - Real-time USB Serial packet and button logging is enabled by default via `ENABLE_USB_VERBOSE_DEBUG` in [`config.h`](config.h).
-  - Send keys `1`–`5` (sensitivity), `v` (toggle verbose real-time packet/button logging), `s` (status), or `r` (reset mouse) over the 115200 baud USB Serial Monitor.
+  - Send keys `1`–`5` (sensitivity), `b` (toggle button swap), `v` (toggle verbose logging), `s` (status), or `r` (reset mouse) over the 115200 baud USB Serial Monitor.
 - **Hot-Plug Support:** Automatically detects the PS/2 `0xAA 0x00` Basic Assurance Test sequence if the mouse is unplugged and reconnected.

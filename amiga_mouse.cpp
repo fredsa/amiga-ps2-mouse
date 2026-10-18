@@ -60,7 +60,8 @@ AmigaMouse::AmigaMouse(uint8_t vPin,
       _lastStepYUs(0),
       _leftPressed(false),
       _rightPressed(false),
-      _middlePressed(false) {}
+      _middlePressed(false),
+      _swapLeftRight(AMIGA_DEFAULT_SWAP_BUTTONS != 0) {}
 
 void AmigaMouse::begin() {
     // Configure quadrature lines as push-pull outputs driving TTL levels
@@ -129,14 +130,34 @@ void AmigaMouse::setScaling(int16_t numerator, int16_t denominator) {
     }
 }
 
+void AmigaMouse::setSensitivityPresetIndex(uint8_t index) {
+    if (index < NUM_SCALING_PRESETS) {
+        _presetIndex = index;
+        setScaling(SCALING_PRESETS[_presetIndex].num, SCALING_PRESETS[_presetIndex].den);
+    }
+}
+
 void AmigaMouse::cycleSensitivityPreset() {
-    _presetIndex = (_presetIndex + 1) % NUM_SCALING_PRESETS;
-    setScaling(SCALING_PRESETS[_presetIndex].num, SCALING_PRESETS[_presetIndex].den);
+    setSensitivityPresetIndex((_presetIndex + 1) % NUM_SCALING_PRESETS);
+}
+
+void AmigaMouse::increaseSensitivityPreset() {
+    if (_presetIndex + 1 < NUM_SCALING_PRESETS) {
+        setSensitivityPresetIndex(_presetIndex + 1);
+    }
+}
+
+void AmigaMouse::decreaseSensitivityPreset() {
+    if (_presetIndex > 0) {
+        setSensitivityPresetIndex(_presetIndex - 1);
+    }
 }
 
 void AmigaMouse::processPs2Packet(const PS2MousePacket &packet) {
-    // Update Left, Right, and Middle mouse buttons immediately
-    setButtons(packet.leftButton, packet.rightButton, packet.middleButton);
+    // Update Left, Right, and Middle mouse buttons immediately (applying L/R swap if enabled)
+    bool outLeft  = _swapLeftRight ? packet.rightButton : packet.leftButton;
+    bool outRight = _swapLeftRight ? packet.leftButton  : packet.rightButton;
+    setButtons(outLeft, outRight, packet.middleButton);
 
     // Convert PS/2 coordinate deltas to Amiga screen deltas:
     //   PS/2:  +X = Right, +Y = Up
@@ -168,6 +189,13 @@ void AmigaMouse::processPs2Packet(const PS2MousePacket &packet) {
 void AmigaMouse::queueRawSteps(int32_t stepsX, int32_t stepsY) {
     _accumX = constrain(_accumX + stepsX, -AMIGA_MAX_ACCUMULATED_DELTA, AMIGA_MAX_ACCUMULATED_DELTA);
     _accumY = constrain(_accumY + stepsY, -AMIGA_MAX_ACCUMULATED_DELTA, AMIGA_MAX_ACCUMULATED_DELTA);
+}
+
+void AmigaMouse::clearPendingSteps() {
+    _accumX = 0;
+    _accumY = 0;
+    _remX = 0;
+    _remY = 0;
 }
 
 uint32_t AmigaMouse::computeStepIntervalUs(int32_t pendingSteps) const {

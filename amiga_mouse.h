@@ -23,6 +23,7 @@ public:
 
     // Directly queue unscaled quadrature steps (e.g., for visual cursor feedback)
     void queueRawSteps(int32_t stepsX, int32_t stepsY);
+    void clearPendingSteps();
 
     // Non-blocking microsecond state machine that outputs quadrature transitions
     // at a controlled rate safe for the Amiga 1000 Denise (8362) JOY0DAT counters.
@@ -32,9 +33,17 @@ public:
     // Directly set button states (true = pressed / active LOW on Amiga port)
     void setButtons(bool left, bool right, bool middle);
 
-    // Configure movement scaling factor (numerator / denominator)
+    // Left/Right button swap control
+    bool isLeftRightSwapped() const { return _swapLeftRight; }
+    void setLeftRightSwapped(bool swapped) { _swapLeftRight = swapped; }
+    bool toggleLeftRightSwapped() { _swapLeftRight = !_swapLeftRight; return _swapLeftRight; }
+
+    // Configure movement scaling factor (numerator / denominator) and presets
     void setScaling(int16_t numerator, int16_t denominator);
+    void setSensitivityPresetIndex(uint8_t index);
     void cycleSensitivityPreset();
+    void increaseSensitivityPreset();
+    void decreaseSensitivityPreset();
     uint8_t getSensitivityPresetIndex() const { return _presetIndex; }
 
     // Diagnostics accessors
@@ -70,10 +79,11 @@ private:
     uint32_t _lastStepXUs;
     uint32_t _lastStepYUs;
 
-    // Current button state cache
+    // Current button state cache & L/R swap flag
     bool _leftPressed;
     bool _rightPressed;
     bool _middlePressed;
+    bool _swapLeftRight;
 
     // Output helpers
     void writeQuadratureX();

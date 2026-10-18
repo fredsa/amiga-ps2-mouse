@@ -84,9 +84,12 @@
 #define AMIGA_DEFAULT_SCALE_NUM     1
 #define AMIGA_DEFAULT_SCALE_DEN     1
 
+// Swap physical Left and Right mouse buttons by default (1 = swapped, 0 = normal)
+#define AMIGA_DEFAULT_SWAP_BUTTONS  1
+
 // Sensitivity feedback cursor wiggle parameters:
-// Each Left/Right pair uses WIGGLE_LEG_DURATION_MS per leg (>= 1 PAL/NTSC VBlank = 25 ms),
-// with WIGGLE_PAIR_PAUSE_MS pause between consecutive Left/Right pairs.
+// Each Up/Down or Left/Right pair uses WIGGLE_LEG_DURATION_MS per leg (>= 1 PAL/NTSC VBlank = 25 ms),
+// with WIGGLE_PAIR_PAUSE_MS pause between consecutive pairs.
 #define WIGGLE_STEP_DELTA           16
 #define WIGGLE_LEG_DURATION_MS      25
 #define WIGGLE_PAIR_PAUSE_MS        250
