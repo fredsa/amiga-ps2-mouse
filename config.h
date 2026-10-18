@@ -50,7 +50,7 @@
 // byte in the packet arrives (inter-byte gap is typically 150-400 us).
 #define PS2_FRAME_TIMEOUT_US    250
 
-// Inter-packet byte timeout (microseconds): bytes within a 3-byte packet arrive
+// Inter-packet byte timeout (microseconds): bytes within a 3/4-byte packet arrive
 // ~1 ms apart, whereas packets arrive 10 ms apart (at 100 Hz). Any gap > 3.5 ms
 // indicates the start of a new packet.
 #define PS2_PACKET_TIMEOUT_US   3500
@@ -80,9 +80,8 @@
 #define AMIGA_INVERT_X          0
 #define AMIGA_INVERT_Y          0
 
-// Default movement scaling numerator/denominator (preset #4: 5/4 = 125% counts)
-#define AMIGA_DEFAULT_SCALE_NUM     5
-#define AMIGA_DEFAULT_SCALE_DEN     4
+// Default sensitivity preset index (0-based: 0=#1 50%, 1=#2 75%, 2=#3 100%, 3=#4 125%, 4=#5 150%, 5=#6 200%)
+#define AMIGA_DEFAULT_PRESET_INDEX  3
 
 // Swap physical Left and Right mouse buttons by default (1 = swapped, 0 = normal)
 #define AMIGA_DEFAULT_SWAP_BUTTONS  1

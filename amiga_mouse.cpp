@@ -33,6 +33,7 @@ static constexpr ScalingPreset SCALING_PRESETS[] = {
     { 2, 1 }  // #6: 200% speed (fast)
 };
 static constexpr uint8_t NUM_SCALING_PRESETS = sizeof(SCALING_PRESETS) / sizeof(SCALING_PRESETS[0]);
+static_assert(AMIGA_DEFAULT_PRESET_INDEX < NUM_SCALING_PRESETS, "AMIGA_DEFAULT_PRESET_INDEX out of range");
 
 AmigaMouse::AmigaMouse(uint8_t vPin,
                        uint8_t hPin,
@@ -54,9 +55,9 @@ AmigaMouse::AmigaMouse(uint8_t vPin,
       _accumY(0),
       _remX(0),
       _remY(0),
-      _scaleNum(AMIGA_DEFAULT_SCALE_NUM),
-      _scaleDen(AMIGA_DEFAULT_SCALE_DEN),
-      _presetIndex(3),
+      _scaleNum(SCALING_PRESETS[AMIGA_DEFAULT_PRESET_INDEX].num),
+      _scaleDen(SCALING_PRESETS[AMIGA_DEFAULT_PRESET_INDEX].den),
+      _presetIndex(AMIGA_DEFAULT_PRESET_INDEX),
       _lastStepXUs(0),
       _lastStepYUs(0),
       _leftPressed(false),
