@@ -34,6 +34,7 @@ enum ConfigState : uint8_t {
 };
 
 static ConfigState s_configState      = CFG_IDLE;
+static bool        s_cfgAllReleased   = false;
 static bool        s_cfgClickReleased = false;
 static uint32_t    s_chordStartMs     = 0;
 static bool        s_allButtonsHeld   = false;
@@ -83,6 +84,7 @@ static void startCursorJiggle(uint8_t pairs, bool vertical) {
     if (pairs == 0) {
         return;
     }
+    amigaMouse.clearPendingSteps();
     s_wiggleTotalLegs  = pairs * 2 * WIGGLE_STEPS_PER_DIRECTION;
     s_wiggleLegIndex   = 0;
     s_wiggleVertical   = vertical;
@@ -329,13 +331,8 @@ void loop() {
                 s_chordStartMs = 0;
             }
         } else if (s_configState == CFG_WAIT_RELEASE_ALL) {
-            // Ignore dx/dy and wait for all 3 physical buttons to be released
-            if (!packet.leftButton && !packet.rightButton && !packet.middleButton) {
-                s_configState = CFG_WAIT_SINGLE_CLICK;
-#if ENABLE_SERIAL_DEBUG
-                Serial.println(F("[ConfigMode] All buttons released. Waiting for single click (Left=-Sens, Right=+Sens, Middle=Toggle Swap)..."));
-#endif
-            }
+            // Ignore dx/dy and track whether all 3 physical buttons are released
+            s_cfgAllReleased = (!packet.leftButton && !packet.rightButton && !packet.middleButton);
         } else if (s_configState == CFG_WAIT_SINGLE_CLICK) {
             // Ignore dx/dy; check physical buttons directly (independent of swap mode)
             if (packet.leftButton && !packet.rightButton && !packet.middleButton) {
@@ -382,6 +379,7 @@ void loop() {
     // mouse in Stream Mode sends no packets while stationary with buttons held.
     if (s_configState == CFG_IDLE && s_allButtonsHeld && (millis() - s_chordStartMs) >= 1000) {
         s_configState = CFG_WAIT_RELEASE_ALL;
+        s_cfgAllReleased = false;
         s_allButtonsHeld = false;
         s_chordStartMs = 0;
 
@@ -400,6 +398,19 @@ void loop() {
     // Advance non-blocking feedback animations
     updateCursorJiggle();
     updateStatusLedBlink();
+
+    // Advance from CFG_WAIT_RELEASE_ALL to CFG_WAIT_SINGLE_CLICK only after BOTH
+    // all 3 buttons have been released AND the entry jiggle has finished playing.
+    if (s_configState == CFG_WAIT_RELEASE_ALL &&
+        s_cfgAllReleased &&
+        s_wiggleLegIndex >= s_wiggleTotalLegs &&
+        amigaMouse.getPendingX() == 0 &&
+        amigaMouse.getPendingY() == 0) {
+        s_configState = CFG_WAIT_SINGLE_CLICK;
+#if ENABLE_SERIAL_DEBUG
+        Serial.println(F("[ConfigMode] All buttons released & entry jiggle complete. Waiting for single click (Left=-Sens, Right=+Sens, Middle=Toggle Swap)..."));
+#endif
+    }
 
     // Exit configuration mode only after BOTH the clicked button is released
     // AND the entire acknowledgment jiggle has finished playing on screen.
