@@ -33,8 +33,15 @@ enum ConfigState : uint8_t {
     CFG_WAIT_ACK_COMPLETE   // Waiting for clicked button release AND full acknowledgment jiggle completion
 };
 
+enum ConfigClick : uint8_t {
+    CFG_CLICK_NONE = 0,
+    CFG_CLICK_LEFT,
+    CFG_CLICK_RIGHT,
+    CFG_CLICK_MIDDLE
+};
+
 static ConfigState s_configState      = CFG_IDLE;
-static bool        s_cfgAllReleased   = false;
+static ConfigClick s_cfgPendingClick  = CFG_CLICK_NONE;
 static bool        s_cfgClickReleased = false;
 static uint32_t    s_chordStartMs     = 0;
 static bool        s_allButtonsHeld   = false;
@@ -345,40 +352,32 @@ void loop() {
                 s_chordStartMs = 0;
             }
         } else if (s_configState == CFG_WAIT_RELEASE_ALL) {
-            // Ignore dx/dy and track whether all 3 physical buttons are released
-            s_cfgAllReleased = (!packet.leftButton && !packet.rightButton && !packet.middleButton);
+            // Ignore dx/dy and wait for all 3 physical buttons to be released
+            if (!packet.leftButton && !packet.rightButton && !packet.middleButton) {
+                s_cfgPendingClick  = CFG_CLICK_NONE;
+                s_cfgClickReleased = false;
+                s_configState      = CFG_WAIT_SINGLE_CLICK;
+#if ENABLE_SERIAL_DEBUG
+                Serial.println(F("[ConfigMode] All buttons released. Waiting for single click (Left=-Sens, Right=+Sens, Middle=Toggle Swap)..."));
+#endif
+            }
         } else if (s_configState == CFG_WAIT_SINGLE_CLICK) {
-            // Ignore dx/dy; check physical buttons directly (independent of swap mode)
-            if (packet.leftButton && !packet.rightButton && !packet.middleButton) {
-                amigaMouse.decreaseSensitivityPreset();
-                uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
-#if ENABLE_SERIAL_DEBUG
-                Serial.printf("[ConfigMode] Physical LEFT click -> Sensitivity preset #%u\n", presetNum);
-#endif
-                startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
-                startStatusLedBlink(presetNum);
-                s_cfgClickReleased = false;
-                s_configState = CFG_WAIT_ACK_COMPLETE;
-            } else if (packet.rightButton && !packet.leftButton && !packet.middleButton) {
-                amigaMouse.increaseSensitivityPreset();
-                uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
-#if ENABLE_SERIAL_DEBUG
-                Serial.printf("[ConfigMode] Physical RIGHT click -> Sensitivity preset #%u\n", presetNum);
-#endif
-                startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
-                startStatusLedBlink(presetNum);
-                s_cfgClickReleased = false;
-                s_configState = CFG_WAIT_ACK_COMPLETE;
-            } else if (packet.middleButton && !packet.leftButton && !packet.rightButton) {
-                bool swapped = amigaMouse.toggleLeftRightSwapped();
-#if ENABLE_SERIAL_DEBUG
-                Serial.printf("[ConfigMode] Physical MIDDLE click -> Swap Left/Right buttons = %s\n",
-                              swapped ? "ENABLED" : "DISABLED");
-#endif
-                startCursorJiggle(1, false); // Acknowledge with 1 Left/Right wiggle
-                startStatusLedBlink(1);
-                s_cfgClickReleased = false;
-                s_configState = CFG_WAIT_ACK_COMPLETE;
+            // Ignore dx/dy; latch the first single physical button click (even if the
+            // entry jiggle or its post-jiggle pause is still finishing).
+            if (s_cfgPendingClick == CFG_CLICK_NONE) {
+                if (packet.leftButton && !packet.rightButton && !packet.middleButton) {
+                    s_cfgPendingClick  = CFG_CLICK_LEFT;
+                    s_cfgClickReleased = false;
+                } else if (packet.rightButton && !packet.leftButton && !packet.middleButton) {
+                    s_cfgPendingClick  = CFG_CLICK_RIGHT;
+                    s_cfgClickReleased = false;
+                } else if (packet.middleButton && !packet.leftButton && !packet.rightButton) {
+                    s_cfgPendingClick  = CFG_CLICK_MIDDLE;
+                    s_cfgClickReleased = false;
+                }
+            } else if (!packet.leftButton && !packet.rightButton && !packet.middleButton) {
+                // User already released the clicked button while entry jiggle was finishing
+                s_cfgClickReleased = true;
             }
         } else if (s_configState == CFG_WAIT_ACK_COMPLETE) {
             // Keep mouse movement disabled while acknowledgment jiggle plays;
@@ -392,10 +391,11 @@ void loop() {
     // Check 1-second 3-button hold timer continuously in loop() because a PS/2
     // mouse in Stream Mode sends no packets while stationary with buttons held.
     if (s_configState == CFG_IDLE && s_allButtonsHeld && (millis() - s_chordStartMs) >= 1000) {
-        s_configState = CFG_WAIT_RELEASE_ALL;
-        s_cfgAllReleased = false;
-        s_allButtonsHeld = false;
-        s_chordStartMs = 0;
+        s_configState      = CFG_WAIT_RELEASE_ALL;
+        s_cfgPendingClick  = CFG_CLICK_NONE;
+        s_cfgClickReleased = false;
+        s_allButtonsHeld   = false;
+        s_chordStartMs     = 0;
 
         // Release Amiga buttons and clear any queued movement while in config mode
         amigaMouse.setButtons(false, false, false);
@@ -413,17 +413,39 @@ void loop() {
     updateCursorJiggle();
     updateStatusLedBlink();
 
-    // Advance from CFG_WAIT_RELEASE_ALL to CFG_WAIT_SINGLE_CLICK only after BOTH
-    // all 3 buttons have been released AND the entry jiggle has finished playing.
-    if (s_configState == CFG_WAIT_RELEASE_ALL &&
-        s_cfgAllReleased &&
+    // Execute the latched config click once the entry jiggle (including its pause) has finished
+    if (s_configState == CFG_WAIT_SINGLE_CLICK &&
+        s_cfgPendingClick != CFG_CLICK_NONE &&
         s_wiggleLegIndex >= s_wiggleTotalLegs &&
         amigaMouse.getPendingX() == 0 &&
         amigaMouse.getPendingY() == 0) {
-        s_configState = CFG_WAIT_SINGLE_CLICK;
+        if (s_cfgPendingClick == CFG_CLICK_LEFT) {
+            amigaMouse.decreaseSensitivityPreset();
+            uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
 #if ENABLE_SERIAL_DEBUG
-        Serial.println(F("[ConfigMode] All buttons released & entry jiggle complete. Waiting for single click (Left=-Sens, Right=+Sens, Middle=Toggle Swap)..."));
+            Serial.printf("[ConfigMode] Physical LEFT click -> Sensitivity preset #%u\n", presetNum);
 #endif
+            startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
+            startStatusLedBlink(presetNum);
+        } else if (s_cfgPendingClick == CFG_CLICK_RIGHT) {
+            amigaMouse.increaseSensitivityPreset();
+            uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
+#if ENABLE_SERIAL_DEBUG
+            Serial.printf("[ConfigMode] Physical RIGHT click -> Sensitivity preset #%u\n", presetNum);
+#endif
+            startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
+            startStatusLedBlink(presetNum);
+        } else if (s_cfgPendingClick == CFG_CLICK_MIDDLE) {
+            bool swapped = amigaMouse.toggleLeftRightSwapped();
+#if ENABLE_SERIAL_DEBUG
+            Serial.printf("[ConfigMode] Physical MIDDLE click -> Swap Left/Right buttons = %s\n",
+                          swapped ? "ENABLED" : "DISABLED");
+#endif
+            startCursorJiggle(1, false); // Acknowledge with 1 Left/Right wiggle
+            startStatusLedBlink(1);
+        }
+        s_cfgPendingClick = CFG_CLICK_NONE;
+        s_configState     = CFG_WAIT_ACK_COMPLETE;
     }
 
     // Exit configuration mode only after BOTH the clicked button is released
