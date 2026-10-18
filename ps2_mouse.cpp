@@ -484,18 +484,22 @@ bool PS2Mouse::poll(PS2MousePacket &outPacket) {
         }
         _lastPacketByteUs = byteTimeUs;
 
-        uint32_t idleMs = nowMs - _lastActivityMs;
         _lastActivityMs = nowMs;
 
-        // Detect hot-plug self-test completion (0xAA followed by 0x00) only after
-        // the bus has been idle (> 500 ms), so a movement byte of 0xAA (-86)
-        // during active movement is never mistaken for a reset.
-        if (_packetIndex == 0 && b == PS2_RESP_BAT_OK && idleMs > 500) {
+        // Detect hot-plug or brownout self-test completion (0xAA followed by 0x00
+        // and no 3rd packet byte within 5 ms). Because 0xAA has bit 7 set (0xC0 != 0),
+        // it is never a valid normal header byte, and verifying silence after 0x00
+        // distinguishes a 2-byte BAT reset from any 3/4-byte movement packet even
+        // if a power glitch resets the mouse < 500 ms after movement.
+        if (_packetIndex == 0 && b == PS2_RESP_BAT_OK) {
             uint8_t nextByte = 0;
-            if (waitByte(nextByte, 50) && nextByte == 0x00) {
+            uint8_t thirdByte = 0;
+            if (waitByte(nextByte, 50) && nextByte == 0x00 && !waitByte(thirdByte, 5)) {
                 configureDevice();
                 return false;
             }
+            _errorCount++;
+            continue;
         }
 
         // Validate Byte 0 (header/state byte):
