@@ -59,6 +59,7 @@ private:
     volatile uint32_t _rxTimeUs[RX_BUFFER_SIZE];
     volatile size_t   _rxHead;
     volatile size_t   _rxTail;
+    volatile size_t   _rxErrorHead;
     volatile uint8_t  _bitIndex;
     volatile uint8_t  _incomingByte;
     volatile uint8_t  _parityCount;

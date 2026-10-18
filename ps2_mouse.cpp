@@ -29,6 +29,7 @@ PS2Mouse::PS2Mouse(uint8_t clkPin, uint8_t dataPin)
       _dataPin(dataPin),
       _rxHead(0),
       _rxTail(0),
+      _rxErrorHead(0),
       _bitIndex(0),
       _incomingByte(0),
       _parityCount(0),
@@ -99,6 +100,7 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
         if (_bitIndex != 0) {
             // Previous 11-bit frame was incomplete; abort any partial packet
             _errorCount++;
+            _rxErrorHead = _rxHead;
             _rxFrameError = true;
         }
         _bitIndex = 0;
@@ -116,6 +118,7 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
             _bitIndex = 1;
         } else {
             _errorCount++;
+            _rxErrorHead = _rxHead;
             _rxFrameError = true;
         }
     } else if (_bitIndex >= 1 && _bitIndex <= 8) {
@@ -139,10 +142,12 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
                 _rxHead = nextHead;
             } else {
                 _errorCount++;
+                _rxErrorHead = _rxHead;
                 _rxFrameError = true;
             }
         } else {
             _errorCount++;
+            _rxErrorHead = _rxHead;
             _rxFrameError = true;
         }
         _bitIndex = 0;
@@ -177,6 +182,7 @@ bool PS2Mouse::waitByte(uint8_t &outByte, uint32_t timeoutMs) {
 
 void PS2Mouse::clearRxBuffer() {
     _rxTail = _rxHead;
+    _rxErrorHead = _rxHead;
     _packetIndex = 0;
     _rxFrameError = false;
 }
@@ -455,13 +461,18 @@ bool PS2Mouse::poll(PS2MousePacket &outPacket) {
     uint8_t b = 0;
     uint32_t byteTimeUs = 0;
 
-    // If the ISR detected any framing/parity error, discard any partial packet
-    if (_rxFrameError) {
-        _rxFrameError = false;
-        _packetIndex = 0;
-    }
+    while (true) {
+        // If the ISR detected any framing/parity error, discard both any
+        // partial packet in _packetBuf AND any pre-error bytes in _rxBuffer.
+        if (_rxFrameError) {
+            _rxFrameError = false;
+            _rxTail = _rxErrorHead;
+            _packetIndex = 0;
+        }
 
-    while (readByteFromBuffer(b, byteTimeUs)) {
+        if (!readByteFromBuffer(b, byteTimeUs)) {
+            break;
+        }
         uint32_t nowMs = millis();
 
         // Bytes within the same packet arrive ~1 ms apart on the wire, whereas
