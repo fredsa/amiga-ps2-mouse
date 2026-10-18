@@ -25,11 +25,12 @@ struct ScalingPreset {
 };
 
 static constexpr ScalingPreset SCALING_PRESETS[] = {
-    { 1, 2 }, // 50% speed  (fine precision)
-    { 3, 4 }, // 75% speed
-    { 1, 1 }, // 100% speed (1:1 native)
-    { 3, 2 }, // 150% speed
-    { 2, 1 }  // 200% speed (fast)
+    { 1, 2 }, // #1: 50% speed  (fine precision)
+    { 3, 4 }, // #2: 75% speed
+    { 1, 1 }, // #3: 100% speed (1:1 native)
+    { 5, 4 }, // #4: 125% speed (default)
+    { 3, 2 }, // #5: 150% speed
+    { 2, 1 }  // #6: 200% speed (fast)
 };
 static constexpr uint8_t NUM_SCALING_PRESETS = sizeof(SCALING_PRESETS) / sizeof(SCALING_PRESETS[0]);
 
@@ -55,7 +56,7 @@ AmigaMouse::AmigaMouse(uint8_t vPin,
       _remY(0),
       _scaleNum(AMIGA_DEFAULT_SCALE_NUM),
       _scaleDen(AMIGA_DEFAULT_SCALE_DEN),
-      _presetIndex(2),
+      _presetIndex(3),
       _lastStepXUs(0),
       _lastStepYUs(0),
       _leftPressed(false),

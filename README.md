@@ -72,8 +72,8 @@ The Amiga 1000 Mouse Port (Port 1) uses a standard DE-9 male connector on the co
   - Physical Left and Right buttons are **swapped by default** (`AMIGA_DEFAULT_SWAP_BUTTONS = 1` in [`config.h`](config.h)).
   - Hold **Left + Middle + Right** mouse buttons simultaneously for **1 second** to enter **Configuration Mode** (acknowledged by **1 Up/Down cursor jiggle**). While in configuration mode, mouse movement and clicks are not passed to the Amiga.
   - Release all 3 buttons, then click a single physical button (always physical, regardless of swap mode):
-    - **Left Click**: Decrease sensitivity by 1 level (minimum `#1`), acknowledged by `N` **Up/Down** jiggles (`1`–`5`).
-    - **Right Click**: Increase sensitivity by 1 level (maximum `#5`), acknowledged by `N` **Up/Down** jiggles (`1`–`5`).
+    - **Left Click**: Decrease sensitivity by 1 level (minimum `#1`), acknowledged by `N` **Up/Down** jiggles (`1`–`6`).
+    - **Right Click**: Increase sensitivity by 1 level (maximum `#6`), acknowledged by `N` **Up/Down** jiggles (`1`–`6`).
     - **Middle Click**: Toggle the **Swap Left/Right Buttons** flag, acknowledged by **1 Left/Right** wiggle.
   - **Sensitivity Presets (`SCALING_PRESETS` in [`amiga_mouse.cpp`](amiga_mouse.cpp)):**
 
@@ -81,10 +81,11 @@ The Amiga 1000 Mouse Port (Port 1) uses a standard DE-9 male connector on the co
     | :---: | :---: | :---: | :---: | :--- |
     | **#1** | `50%` | `1 : 2` | 1× Up/Down | Fine precision |
     | **#2** | `75%` | `3 : 4` | 2× Up/Down | — |
-    | **#3** | `100%` | `1 : 1` | 3× Up/Down | **Default** (1:1 native counts) |
-    | **#4** | `150%` | `3 : 2` | 4× Up/Down | — |
-    | **#5** | `200%` | `2 : 1` | 5× Up/Down | Fast |
+    | **#3** | `100%` | `1 : 1` | 3× Up/Down | 1:1 native counts |
+    | **#4** | `125%` | `5 : 4` | 4× Up/Down | **Default** |
+    | **#5** | `150%` | `3 : 2` | 5× Up/Down | — |
+    | **#6** | `200%` | `2 : 1` | 6× Up/Down | Fast |
 
   - Real-time USB Serial packet and button logging is enabled by default via `ENABLE_USB_VERBOSE_DEBUG` in [`config.h`](config.h).
-  - Send keys `1`–`5` (sensitivity), `b` (toggle button swap), `v` (toggle verbose logging), `s` (status), or `r` (reset mouse) over the 115200 baud USB Serial Monitor.
+  - Send keys `1`–`6` (sensitivity), `b` (toggle button swap), `v` (toggle verbose logging), `s` (status), or `r` (reset mouse) over the 115200 baud USB Serial Monitor.
 - **Hot-Plug Support:** Automatically detects the PS/2 `0xAA 0x00` Basic Assurance Test sequence if the mouse is unplugged and reconnected.

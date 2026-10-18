@@ -176,15 +176,21 @@ static void handleSerialCommands() {
                 break;
             case '4':
                 amigaMouse.setSensitivityPresetIndex(3);
-                Serial.println(F("[AmigaMouse] Sensitivity set to #4: 150% (3:2)"));
+                Serial.println(F("[AmigaMouse] Sensitivity set to #4: 125% (5:4)"));
                 startCursorJiggle(4, true);
                 startStatusLedBlink(4);
                 break;
             case '5':
                 amigaMouse.setSensitivityPresetIndex(4);
-                Serial.println(F("[AmigaMouse] Sensitivity set to #5: 200% (2:1)"));
+                Serial.println(F("[AmigaMouse] Sensitivity set to #5: 150% (3:2)"));
                 startCursorJiggle(5, true);
                 startStatusLedBlink(5);
+                break;
+            case '6':
+                amigaMouse.setSensitivityPresetIndex(5);
+                Serial.println(F("[AmigaMouse] Sensitivity set to #6: 200% (2:1)"));
+                startCursorJiggle(6, true);
+                startStatusLedBlink(6);
                 break;
             case 'b':
             case 'B': {

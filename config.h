@@ -80,9 +80,9 @@
 #define AMIGA_INVERT_X          0
 #define AMIGA_INVERT_Y          0
 
-// Default movement scaling numerator/denominator (e.g., 1/1 = 100% native counts)
-#define AMIGA_DEFAULT_SCALE_NUM     1
-#define AMIGA_DEFAULT_SCALE_DEN     1
+// Default movement scaling numerator/denominator (preset #4: 5/4 = 125% counts)
+#define AMIGA_DEFAULT_SCALE_NUM     5
+#define AMIGA_DEFAULT_SCALE_DEN     4
 
 // Swap physical Left and Right mouse buttons by default (1 = swapped, 0 = normal)
 #define AMIGA_DEFAULT_SWAP_BUTTONS  1
