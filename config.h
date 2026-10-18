@@ -30,7 +30,7 @@
 #define PIN_AMIGA_RMB           8   // Amiga DB9 Pin 9: Right Mouse Button  (Active LOW)
 
 // Onboard status LED (GPIO 2 or GPIO 48 on many ESP32-S3 DevKitC-1 boards)
-#define PIN_STATUS_LED          2
+#define PIN_STATUS_LED          PIN_RGB_LED
 
 // ============================================================================
 // PS/2 Mouse Configuration
