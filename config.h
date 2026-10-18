@@ -1,0 +1,80 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+#include <Arduino.h>
+
+// ============================================================================
+// ESP32-S3 Dev Module Pin Assignments
+// ============================================================================
+// Note: Avoid GPIO 0, 3, 45, 46 (strapping pins), GPIO 19, 20 (USB D-/D+),
+// and GPIO 26-32 (SPI flash/PSRAM).
+//
+// PS/2 Mouse lines are 5V open-collector. Because the ESP32-S3 is 3.3V logic,
+// use a bidirectional logic level converter (e.g., BSS138 4-channel module)
+// between the PS/2 mouse and these GPIOs, or pull PS/2 DATA/CLK to 3.3V if the
+// mouse supports 3.3V CMOS thresholds.
+#define PIN_PS2_CLK             4   // PS/2 Mini-DIN-6 Pin 5 (Clock)
+#define PIN_PS2_DATA            5   // PS/2 Mini-DIN-6 Pin 1 (Data)
+
+// Amiga 1000 DE-9 (DB9) Mouse Port Connections:
+// Amiga 1000 uses a 74LS157 (TTL input thresholds: V_IL <= 0.8V, V_IH >= 2.0V)
+// feeding the Denise (8362) chip for quadrature, and CIA-A / Paula with
+// internal pull-ups for mouse buttons.
+#define PIN_AMIGA_V_PULSE       6   // Amiga DB9 Pin 1: V-pulse  (Vertical Y1)
+#define PIN_AMIGA_H_PULSE       7   // Amiga DB9 Pin 2: H-pulse  (Horizontal X1)
+#define PIN_AMIGA_VQ_PULSE      15  // Amiga DB9 Pin 3: VQ-pulse (Vertical Y2)
+#define PIN_AMIGA_HQ_PULSE      16  // Amiga DB9 Pin 4: HQ-pulse (Horizontal X2)
+
+#define PIN_AMIGA_MMB           17  // Amiga DB9 Pin 5: Middle Mouse Button (Active LOW)
+#define PIN_AMIGA_LMB           18  // Amiga DB9 Pin 6: Left Mouse Button   (Active LOW)
+#define PIN_AMIGA_RMB           8   // Amiga DB9 Pin 9: Right Mouse Button  (Active LOW)
+
+// Onboard status LED (GPIO 2 or GPIO 48 on many ESP32-S3 DevKitC-1 boards)
+#define PIN_STATUS_LED          2
+
+// ============================================================================
+// PS/2 Mouse Configuration
+// ============================================================================
+// Sample rate in reports/second (valid PS/2 values: 10, 20, 40, 60, 80, 100, 200)
+#define PS2_DEFAULT_SAMPLE_RATE 100
+
+// Resolution code: 0 = 1 count/mm, 1 = 2 counts/mm, 2 = 4 counts/mm, 3 = 8 counts/mm
+#define PS2_DEFAULT_RESOLUTION  2
+
+// Frame bit timeout (microseconds): if clock edges stop for longer than this,
+// reset the bit state machine to recover from noise or partial transfers.
+#define PS2_FRAME_TIMEOUT_US    2500
+
+// Periodic watchdog interval (milliseconds): check if the PS/2 lines are stuck
+// or if a mouse was hot-plugged.
+#define PS2_WATCHDOG_MS         1000
+
+// ============================================================================
+// Amiga Quadrature & Timing Configuration
+// ============================================================================
+// Amiga's Denise chip maintains an 8-bit signed counter per axis in JOY0DAT
+// (-128 to +127), which Intuition/gameport.device reads once per Vertical Blank
+// (50 Hz PAL = 20 ms, 60 Hz NTSC = 16.67 ms).
+//
+// If more than 127 quadrature transitions occur within a single 20 ms PAL frame,
+// the 8-bit counter overflows and the cursor violently reverses direction!
+// Capping the maximum step rate to ~5,000 steps/sec (200 us minimum per step)
+// limits each 20 ms frame to at most 100 counts, completely preventing wrap-around.
+#define AMIGA_MIN_STEP_INTERVAL_US  200   // Fastest step interval (5,000 steps/s)
+#define AMIGA_MAX_STEP_INTERVAL_US  800   // Base step interval for slow movements
+
+// Maximum queued delta counts per axis to prevent runaway lag after a huge flick
+#define AMIGA_MAX_ACCUMULATED_DELTA 512
+
+// Axis inversion flags (set to 1 to invert axis direction if desired)
+#define AMIGA_INVERT_X          0
+#define AMIGA_INVERT_Y          0
+
+// Default movement scaling numerator/denominator (e.g., 1/1 = 100% native counts)
+#define AMIGA_DEFAULT_SCALE_NUM 1
+#define AMIGA_DEFAULT_SCALE_DEN 1
+
+// Enable serial diagnostic output at 115200 baud
+#define ENABLE_SERIAL_DEBUG     1
+
+#endif // CONFIG_H
