@@ -45,12 +45,14 @@ static ConfigClick s_cfgPendingClick  = CFG_CLICK_NONE;
 static bool        s_cfgClickReleased = false;
 static uint32_t    s_chordStartMs     = 0;
 static bool        s_allButtonsHeld   = false;
+#if ENABLE_SERIAL_DEBUG
 static bool        s_verboseDebug     = (ENABLE_USB_VERBOSE_DEBUG != 0);
 static bool        s_prevLeft         = false;
 static bool        s_prevRight        = false;
 static bool        s_prevMiddle       = false;
 static bool        s_prevBtn4         = false;
 static bool        s_prevBtn5         = false;
+#endif
 
 #if ENABLE_STATUS_LED
 // Non-blocking status LED blink state machine
