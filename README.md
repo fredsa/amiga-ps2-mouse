@@ -87,5 +87,5 @@ The Amiga 1000 Mouse Port (Port 1) uses a standard DE-9 male connector on the co
     | **#6** | `200%` | `2 : 1` | 6× Up/Down | Fast |
 
   - Real-time USB Serial packet and button logging is enabled by default via `ENABLE_USB_VERBOSE_DEBUG` in [`config.h`](config.h).
-  - Send keys `1`–`6` (sensitivity), `b` (toggle button swap), `v` (toggle verbose logging), `s` (status), or `r` (reset mouse) over the 115200 baud USB Serial Monitor.
+  - Send keys `1`–`6` (Amiga sensitivity), `b` (toggle button swap), `c` (toggle PS/2 hardware scaling `1:1`/`2:1`), `e` or `[`/`]` (cycle or decrease/increase PS/2 hardware resolution `1`/`2`/`4`/`8` counts/mm), `v` (toggle verbose logging), `s` (status & interrogated PS/2 config), `r` (reset mouse), or `h`/`?` (help) over the 115200 baud USB Serial Monitor.
 - **Hot-Plug Support:** Automatically detects the PS/2 `0xAA 0x00` Basic Assurance Test sequence if the mouse is unplugged and reconnected.

@@ -11,6 +11,7 @@ static void IRAM_ATTR ps2ClockIsrTrampoline() {
 
 // PS/2 Command Constants
 static constexpr uint8_t PS2_CMD_SET_SCALING_1_1   = 0xE6;
+static constexpr uint8_t PS2_CMD_SET_SCALING_2_1   = 0xE7;
 static constexpr uint8_t PS2_CMD_SET_RESOLUTION    = 0xE8;
 static constexpr uint8_t PS2_CMD_STATUS_REQUEST    = 0xE9;
 static constexpr uint8_t PS2_CMD_GET_DEVICE_ID     = 0xF2;
@@ -336,6 +337,44 @@ bool PS2Mouse::setSampleRate(uint8_t rate) {
 
 bool PS2Mouse::setResolution(uint8_t resolutionCode) {
     return sendCommandWithArg(PS2_CMD_SET_RESOLUTION, resolutionCode & 0x03);
+}
+
+bool PS2Mouse::setScaling(bool scaling2To1) {
+    return sendCommand(scaling2To1 ? PS2_CMD_SET_SCALING_2_1 : PS2_CMD_SET_SCALING_1_1);
+}
+
+bool PS2Mouse::applyScaling(bool scaling2To1) {
+    // Pause streaming (0xF5) so movement bytes cannot collide with commands or 0xE9 reply
+    sendCommand(PS2_CMD_DISABLE_REPORTING);
+    bool ok = setScaling(scaling2To1);
+    queryStatus(_status);
+    if (enableStreaming() && _status.valid) {
+        _status.reportingEnabled = true;
+        _status.rawStatus |= 0x20;
+    }
+    clearRxBuffer();
+    _packetIndex = 0;
+    _lastActivityMs = millis();
+    _lastPacketByteUs = micros();
+    printInterrogatedConfig();
+    return ok;
+}
+
+bool PS2Mouse::applyResolution(uint8_t resolutionCode) {
+    // Pause streaming (0xF5) so movement bytes cannot collide with commands or 0xE9 reply
+    sendCommand(PS2_CMD_DISABLE_REPORTING);
+    bool ok = setResolution(resolutionCode);
+    queryStatus(_status);
+    if (enableStreaming() && _status.valid) {
+        _status.reportingEnabled = true;
+        _status.rawStatus |= 0x20;
+    }
+    clearRxBuffer();
+    _packetIndex = 0;
+    _lastActivityMs = millis();
+    _lastPacketByteUs = micros();
+    printInterrogatedConfig();
+    return ok;
 }
 
 bool PS2Mouse::enableStreaming() {

@@ -331,6 +331,49 @@ static void handleSerialCommands() {
                 startStatusLedBlink(1);
                 break;
             }
+            case 'c':
+            case 'C': {
+                bool nextScaling2To1 = !ps2Mouse.getStatus().scaling2To1;
+                Serial.printf("[PS2Mouse] Setting PS/2 hardware scaling to %s...\n",
+                              nextScaling2To1 ? "2:1 (0xE7)" : "1:1 (0xE6)");
+                if (!ps2Mouse.applyScaling(nextScaling2To1)) {
+                    Serial.println(F("[PS2Mouse] Failed to set PS/2 scaling."));
+                }
+                break;
+            }
+            case 'e':
+            case 'E': {
+                uint8_t nextRes = (ps2Mouse.getStatus().resolutionCode + 1) & 0x03;
+                Serial.printf("[PS2Mouse] Cycling PS/2 hardware resolution to code %u (%u counts/mm)...\n",
+                              static_cast<unsigned>(nextRes),
+                              static_cast<unsigned>(1U << nextRes));
+                if (!ps2Mouse.applyResolution(nextRes)) {
+                    Serial.println(F("[PS2Mouse] Failed to set PS/2 resolution."));
+                }
+                break;
+            }
+            case '[': {
+                uint8_t curRes  = ps2Mouse.getStatus().resolutionCode & 0x03;
+                uint8_t nextRes = (curRes > 0) ? (curRes - 1) : 0;
+                Serial.printf("[PS2Mouse] Setting PS/2 hardware resolution to code %u (%u counts/mm)...\n",
+                              static_cast<unsigned>(nextRes),
+                              static_cast<unsigned>(1U << nextRes));
+                if (!ps2Mouse.applyResolution(nextRes)) {
+                    Serial.println(F("[PS2Mouse] Failed to set PS/2 resolution."));
+                }
+                break;
+            }
+            case ']': {
+                uint8_t curRes  = ps2Mouse.getStatus().resolutionCode & 0x03;
+                uint8_t nextRes = (curRes < 3) ? (curRes + 1) : 3;
+                Serial.printf("[PS2Mouse] Setting PS/2 hardware resolution to code %u (%u counts/mm)...\n",
+                              static_cast<unsigned>(nextRes),
+                              static_cast<unsigned>(1U << nextRes));
+                if (!ps2Mouse.applyResolution(nextRes)) {
+                    Serial.println(F("[PS2Mouse] Failed to set PS/2 resolution."));
+                }
+                break;
+            }
             case 'v':
             case 'V':
             case 'p':
@@ -362,6 +405,11 @@ static void handleSerialCommands() {
                 if (ps2Mouse.isConnected()) {
                     ps2Mouse.printInterrogatedConfig();
                 }
+                break;
+            case 'h':
+            case 'H':
+            case '?':
+                Serial.println(F("[Help] Serial Commands: 1-6=Amiga sensitivity | b=Swap L/R | c=Toggle PS/2 scaling (1:1/2:1) | e=Cycle PS/2 resolution | [/]=Dec/Inc PS/2 resolution | v=Toggle verbose | s=Status | r=Reset mouse"));
                 break;
             default:
                 break;

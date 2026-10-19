@@ -50,6 +50,9 @@ public:
     // Send configuration commands to the PS/2 mouse
     bool setSampleRate(uint8_t rate);
     bool setResolution(uint8_t resolutionCode);
+    bool setScaling(bool scaling2To1);
+    bool applyScaling(bool scaling2To1);
+    bool applyResolution(uint8_t resolutionCode);
     bool enableStreaming();
     bool resetDevice();
     bool queryStatus(PS2MouseStatus &outStatus);
