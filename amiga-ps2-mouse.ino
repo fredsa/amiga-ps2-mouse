@@ -341,12 +341,7 @@ static void handleSerialCommands() {
             case 'r':
             case 'R':
                 Serial.println(F("[PS2Mouse] Resetting PS/2 mouse..."));
-                if (ps2Mouse.begin()) {
-                    Serial.printf("[PS2Mouse] Reset & initialization succeeded. Device ID=0x%02X (%s)\n",
-                                  ps2Mouse.getDeviceId(),
-                                  ps2Mouse.getDeviceId() == 0x04 ? "IntelliMouse Explorer 4-byte (5-btn + scroll)" :
-                                  (ps2Mouse.hasScrollWheel() ? "IntelliMouse 4-byte (scroll wheel/nub)" : "Standard PS/2 3-byte"));
-                } else {
+                if (!ps2Mouse.begin()) {
                     Serial.println(F("[PS2Mouse] Reset failed (check wiring/power)."));
                 }
                 break;
@@ -364,6 +359,9 @@ static void handleSerialCommands() {
                     static_cast<long>(amigaMouse.getPendingY()),
                     s_verboseDebug ? 1 : 0
                 );
+                if (ps2Mouse.isConnected()) {
+                    ps2Mouse.printInterrogatedConfig();
+                }
                 break;
             default:
                 break;
@@ -411,12 +409,6 @@ void setup() {
     if (ok) {
 #if ENABLE_STATUS_LED
         digitalWrite(PIN_STATUS_LED, HIGH);
-#endif
-#if ENABLE_SERIAL_DEBUG
-        Serial.printf("[PS2Mouse] Initialized! Device ID=0x%02X (%s)\n",
-                      ps2Mouse.getDeviceId(),
-                      ps2Mouse.getDeviceId() == 0x04 ? "IntelliMouse Explorer 4-byte (5-btn + scroll)" :
-                      (ps2Mouse.hasScrollWheel() ? "IntelliMouse 4-byte (scroll wheel/nub)" : "Standard PS/2 3-byte"));
 #endif
     } else {
 #if ENABLE_SERIAL_DEBUG

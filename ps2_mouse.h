@@ -19,6 +19,20 @@ struct PS2MousePacket {
     bool    yOverflow;   // Y delta overflow flag
 };
 
+// Decoded PS/2 mouse 3-byte status response from Status Request (0xE9)
+struct PS2MouseStatus {
+    bool    valid;            // true if 0xE9 status request succeeded
+    uint8_t rawStatus;        // Byte 0: raw status flags
+    bool    remoteMode;       // Byte 0 bit 6: false = Stream Mode, true = Remote Mode
+    bool    reportingEnabled; // Byte 0 bit 5: Data reporting enabled
+    bool    scaling2To1;      // Byte 0 bit 4: false = 1:1 scaling, true = 2:1 scaling
+    bool    leftButton;       // Byte 0 bit 2: Left button currently pressed
+    bool    middleButton;     // Byte 0 bit 1: Middle button currently pressed
+    bool    rightButton;      // Byte 0 bit 0: Right button currently pressed
+    uint8_t resolutionCode;   // Byte 1: 0=1, 1=2, 2=4, 3=8 counts/mm
+    uint8_t sampleRate;       // Byte 2: Sample rate in Hz (10..200)
+};
+
 class PS2Mouse {
 public:
     PS2Mouse(uint8_t clkPin, uint8_t dataPin);
@@ -38,11 +52,16 @@ public:
     bool setResolution(uint8_t resolutionCode);
     bool enableStreaming();
     bool resetDevice();
+    bool queryStatus(PS2MouseStatus &outStatus);
+    void printInterrogatedConfig() const;
 
     // Accessors
     bool isConnected() const { return _connected; }
     bool hasScrollWheel() const { return _hasWheel; }
     uint8_t getDeviceId() const { return _deviceId; }
+    uint8_t getPacketSize() const { return _packetSize; }
+    const PS2MouseStatus &getStatus() const { return _status; }
+    const PS2MouseStatus &getDefaultStatus() const { return _defaultStatus; }
     uint32_t getPacketCount() const { return _packetCount; }
     uint32_t getErrorCount() const { return _errorCount; }
 
@@ -79,9 +98,11 @@ private:
     uint32_t _packetCount;
 
     // Device state
-    bool     _connected;
-    bool     _hasWheel;
-    uint8_t  _deviceId;
+    bool           _connected;
+    bool           _hasWheel;
+    uint8_t        _deviceId;
+    PS2MouseStatus _defaultStatus;
+    PS2MouseStatus _status;
 
     // Low-level open-drain line helpers
     void releaseLine(uint8_t pin);

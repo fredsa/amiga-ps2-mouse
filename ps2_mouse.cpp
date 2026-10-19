@@ -12,6 +12,7 @@ static void IRAM_ATTR ps2ClockIsrTrampoline() {
 // PS/2 Command Constants
 static constexpr uint8_t PS2_CMD_SET_SCALING_1_1   = 0xE6;
 static constexpr uint8_t PS2_CMD_SET_RESOLUTION    = 0xE8;
+static constexpr uint8_t PS2_CMD_STATUS_REQUEST    = 0xE9;
 static constexpr uint8_t PS2_CMD_GET_DEVICE_ID     = 0xF2;
 static constexpr uint8_t PS2_CMD_SET_SAMPLE_RATE   = 0xF3;
 static constexpr uint8_t PS2_CMD_ENABLE_REPORTING  = 0xF4;
@@ -46,7 +47,9 @@ PS2Mouse::PS2Mouse(uint8_t clkPin, uint8_t dataPin)
       _packetCount(0),
       _connected(false),
       _hasWheel(false),
-      _deviceId(0x00) {
+      _deviceId(0x00),
+      _defaultStatus{},
+      _status{} {
     memset(_packetBuf, 0, sizeof(_packetBuf));
 }
 
@@ -372,6 +375,81 @@ bool PS2Mouse::tryEnableIntelliMouse() {
     return _hasWheel;
 }
 
+bool PS2Mouse::queryStatus(PS2MouseStatus &outStatus) {
+    outStatus = PS2MouseStatus{};
+    clearRxBuffer();
+    if (!sendCommand(PS2_CMD_STATUS_REQUEST)) {
+        return false;
+    }
+
+    uint8_t s0 = 0, s1 = 0, s2 = 0;
+    if (!waitByte(s0, 100) || !waitByte(s1, 100) || !waitByte(s2, 100)) {
+        return false;
+    }
+
+    outStatus.valid            = true;
+    outStatus.rawStatus        = s0;
+    outStatus.remoteMode       = (s0 & 0x40) != 0;
+    outStatus.reportingEnabled = (s0 & 0x20) != 0;
+    outStatus.scaling2To1      = (s0 & 0x10) != 0;
+    outStatus.leftButton       = (s0 & 0x04) != 0;
+    outStatus.middleButton     = (s0 & 0x02) != 0;
+    outStatus.rightButton      = (s0 & 0x01) != 0;
+    outStatus.resolutionCode   = s1;
+    outStatus.sampleRate       = s2;
+    return true;
+}
+
+static uint8_t resolutionCountsPerMm(uint8_t code) {
+    return (code <= 3) ? static_cast<uint8_t>(1U << code) : 0;
+}
+
+void PS2Mouse::printInterrogatedConfig() const {
+#if ENABLE_SERIAL_DEBUG
+    const char *devTypeStr =
+        (_deviceId == 0x04) ? "IntelliMouse Explorer (5-btn + scroll)" :
+        (_deviceId == 0x03) ? "IntelliMouse (3-btn + scroll wheel/nub)" :
+                              "Standard PS/2";
+
+    Serial.println(F("----------------------------------------------------------"));
+    Serial.printf("[PS2Mouse] Mouse Detected! Device ID=0x%02X (%s, %u-byte packets)\n",
+                  _deviceId, devTypeStr, static_cast<unsigned>(_packetSize));
+
+    if (_defaultStatus.valid) {
+        Serial.printf("  Reset Defaults (0xE9) : Scaling=%s | Resolution=%u cnt/mm (code %u) | SampleRate=%u Hz | Mode=%s | Raw=[0x%02X 0x%02X 0x%02X]\n",
+                      _defaultStatus.scaling2To1 ? "2:1" : "1:1",
+                      static_cast<unsigned>(resolutionCountsPerMm(_defaultStatus.resolutionCode)),
+                      static_cast<unsigned>(_defaultStatus.resolutionCode),
+                      static_cast<unsigned>(_defaultStatus.sampleRate),
+                      _defaultStatus.remoteMode ? "Remote" : "Stream",
+                      _defaultStatus.rawStatus,
+                      _defaultStatus.resolutionCode,
+                      _defaultStatus.sampleRate);
+    } else {
+        Serial.println(F("  Reset Defaults (0xE9) : (not reported by device)"));
+    }
+
+    if (_status.valid) {
+        Serial.printf("  Active Config  (0xE9) : Scaling=%s | Resolution=%u cnt/mm (code %u) | SampleRate=%u Hz | Mode=%s | Reporting=%s | Btns(L/M/R)=%d/%d/%d | Raw=[0x%02X 0x%02X 0x%02X]\n",
+                      _status.scaling2To1 ? "2:1" : "1:1",
+                      static_cast<unsigned>(resolutionCountsPerMm(_status.resolutionCode)),
+                      static_cast<unsigned>(_status.resolutionCode),
+                      static_cast<unsigned>(_status.sampleRate),
+                      _status.remoteMode ? "Remote" : "Stream",
+                      _status.reportingEnabled ? "ON" : "OFF",
+                      _status.leftButton ? 1 : 0,
+                      _status.middleButton ? 1 : 0,
+                      _status.rightButton ? 1 : 0,
+                      _status.rawStatus,
+                      _status.resolutionCode,
+                      _status.sampleRate);
+    } else {
+        Serial.println(F("  Active Config  (0xE9) : (not reported by device)"));
+    }
+    Serial.println(F("----------------------------------------------------------"));
+#endif
+}
+
 bool PS2Mouse::resetDevice() {
     clearRxBuffer();
     if (!sendCommand(PS2_CMD_RESET)) {
@@ -395,6 +473,8 @@ bool PS2Mouse::configureDevice() {
     _deviceId = 0x00;
     _hasWheel = false;
     _packetSize = 3;
+    _defaultStatus = PS2MouseStatus{};
+    _status        = PS2MouseStatus{};
 
     // Attempt a full reset first; if the mouse doesn't respond to 0xFF,
     // fall back to Set Defaults (0xF6) for clones that skip BAT.
@@ -404,6 +484,9 @@ bool PS2Mouse::configureDevice() {
             return false;
         }
     }
+
+    // Interrogate the mouse's power-on default configuration (0xE9) while reporting is disabled
+    queryStatus(_defaultStatus);
 
     // Configure 1:1 scaling and resolution before negotiating IntelliMouse extensions
     sendCommand(PS2_CMD_SET_SCALING_1_1);
@@ -426,16 +509,26 @@ bool PS2Mouse::configureDevice() {
         }
     }
 
+    // Interrogate active configuration (scaling, resolution, sample rate, mode) via 0xE9
+    // before enabling streaming so no movement packets can interleave with the 3-byte reply.
+    queryStatus(_status);
+
     // Enable continuous data reporting (0xF4)
     if (!enableStreaming()) {
         _connected = false;
         return false;
+    }
+    if (_status.valid) {
+        _status.reportingEnabled = true;
+        _status.rawStatus |= 0x20;
     }
 
     clearRxBuffer();
     _connected = true;
     _lastActivityMs = millis();
     _lastPacketByteUs = micros();
+
+    printInterrogatedConfig();
     return true;
 }
 
