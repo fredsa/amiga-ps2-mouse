@@ -265,6 +265,8 @@ static void handleSerialCommands() {
 }
 
 void setup() {
+    setCpuFrequencyMhz(ESP32_CPU_FREQ_MHZ);
+
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, LOW);
 
@@ -281,6 +283,7 @@ void setup() {
     Serial.println(F("=========================================================="));
     Serial.println(F(" Amiga 1000 PS/2 Mouse Adapter - ESP32-S3 Dev Module"));
     Serial.println(F("=========================================================="));
+    Serial.printf(" CPU Freq   : %lu MHz\n", static_cast<unsigned long>(getCpuFrequencyMhz()));
     Serial.printf(" PS/2 Pins  : CLK=GPIO%d, DATA=GPIO%d\n", PIN_PS2_CLK, PIN_PS2_DATA);
     Serial.printf(" Amiga Quad : V=GPIO%d, H=GPIO%d, VQ=GPIO%d, HQ=GPIO%d\n",
                   PIN_AMIGA_V_PULSE, PIN_AMIGA_H_PULSE, PIN_AMIGA_VQ_PULSE, PIN_AMIGA_HQ_PULSE);
