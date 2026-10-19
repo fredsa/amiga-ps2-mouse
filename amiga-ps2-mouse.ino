@@ -68,12 +68,29 @@ static uint32_t s_ledLastToggleMs    = 0;
 static constexpr uint16_t LED_BLINK_INTERVAL_MS = 80;
 #endif
 
-// Non-blocking artificial cursor jiggle state machine (N x Up/Down or Left/Right pairs)
-static uint8_t  s_wiggleLegIndex     = 0;
-static uint8_t  s_wiggleTotalLegs    = 0;     // pairs * 2 * WIGGLE_STEPS_PER_DIRECTION
-static bool     s_wiggleVertical     = true;  // true = Up/Down, false = Left/Right
-static bool     s_wiggleWaitingPause = false; // true once current leg's pulses have finished
-static uint32_t s_wigglePauseStartUs = 0;     // micros() timestamp when current leg finished
+// Non-blocking artificial cursor jiggle state machine:
+// - JIGGLE_VERTICAL:   N x Up/Down pairs
+// - JIGGLE_HORIZONTAL: N x Left/Right pairs
+// - JIGGLE_DIAMOND:    6-segment clockwise diamond:
+//                      1) Up (to 12 o'clock)
+//                      2) Down/Right (to 3 o'clock)
+//                      3) Left/Down (to 6 o'clock)
+//                      4) Left/Up (to 9 o'clock)
+//                      5) Right/Up (to 12 o'clock)
+//                      6) Down (to return to center)
+enum JiggleMode : uint8_t {
+    JIGGLE_VERTICAL = 0,
+    JIGGLE_HORIZONTAL,
+    JIGGLE_DIAMOND
+};
+
+static constexpr uint8_t DIAMOND_SEGMENTS = 6;
+
+static uint8_t    s_wiggleLegIndex     = 0;
+static uint8_t    s_wiggleTotalLegs    = 0;
+static JiggleMode s_wiggleMode         = JIGGLE_VERTICAL;
+static bool       s_wiggleWaitingPause = false; // true once current leg's pulses have finished
+static uint32_t   s_wigglePauseStartUs = 0;     // micros() timestamp when current leg finished
 
 static void startStatusLedBlink(uint8_t count) {
 #if ENABLE_STATUS_LED
@@ -106,6 +123,56 @@ static void updateStatusLedBlink() {
 #endif
 }
 
+static void getDiamondStepDelta(uint8_t segmentIndex, int32_t &outDx, int32_t &outDy) {
+    switch (segmentIndex) {
+        case 0: // Up (to 12 o'clock)
+            outDx = 0;
+            outDy = -WIGGLE_STEP_DELTA;
+            break;
+        case 1: // Down/Right (to 3 o'clock)
+            outDx = +WIGGLE_STEP_DELTA;
+            outDy = +WIGGLE_STEP_DELTA;
+            break;
+        case 2: // Left/Down (to 6 o'clock)
+            outDx = -WIGGLE_STEP_DELTA;
+            outDy = +WIGGLE_STEP_DELTA;
+            break;
+        case 3: // Left/Up (to 9 o'clock)
+            outDx = -WIGGLE_STEP_DELTA;
+            outDy = -WIGGLE_STEP_DELTA;
+            break;
+        case 4: // Right/Up (to 12 o'clock)
+            outDx = +WIGGLE_STEP_DELTA;
+            outDy = -WIGGLE_STEP_DELTA;
+            break;
+        default: // 5: Down (return to center)
+            outDx = 0;
+            outDy = +WIGGLE_STEP_DELTA;
+            break;
+    }
+}
+
+static void startCursorDiamond() {
+    amigaMouse.clearPendingSteps();
+    s_wiggleTotalLegs    = DIAMOND_SEGMENTS * WIGGLE_STEPS_PER_DIRECTION;
+    s_wiggleLegIndex     = 0;
+    s_wiggleMode         = JIGGLE_DIAMOND;
+    s_wiggleWaitingPause = false;
+
+    int32_t dx = 0, dy = 0;
+    getDiamondStepDelta(0, dx, dy);
+    amigaMouse.queueRawSteps(dx, dy);
+#if ENABLE_SERIAL_DEBUG
+    if (s_verboseDebug) {
+        Serial.printf("[AmigaMouse] Artificial diamond seg 1/%u step 1/%u (dx=%+ld, dy=%+ld)\n",
+                      static_cast<unsigned>(DIAMOND_SEGMENTS),
+                      static_cast<unsigned>(WIGGLE_STEPS_PER_DIRECTION),
+                      static_cast<long>(dx),
+                      static_cast<long>(dy));
+    }
+#endif
+}
+
 static void startCursorJiggle(uint8_t pairs, bool vertical) {
     if (pairs == 0) {
         return;
@@ -113,7 +180,7 @@ static void startCursorJiggle(uint8_t pairs, bool vertical) {
     amigaMouse.clearPendingSteps();
     s_wiggleTotalLegs    = pairs * 2 * WIGGLE_STEPS_PER_DIRECTION;
     s_wiggleLegIndex     = 0;
-    s_wiggleVertical     = vertical;
+    s_wiggleMode         = vertical ? JIGGLE_VERTICAL : JIGGLE_HORIZONTAL;
     s_wiggleWaitingPause = false;
 
     // First step: UP (dy = -WIGGLE_STEP_DELTA) if vertical, or LEFT (dx = -WIGGLE_STEP_DELTA) if horizontal
@@ -152,40 +219,65 @@ static void updateCursorJiggle() {
     }
 
     static constexpr uint8_t LEGS_PER_PAIR = 2 * WIGGLE_STEPS_PER_DIRECTION;
-    uint8_t legInPair = s_wiggleLegIndex % LEGS_PER_PAIR;
-    bool isEndOfPair  = (legInPair == (LEGS_PER_PAIR - 1));
+    bool isLongPause = false;
+    if (s_wiggleMode == JIGGLE_DIAMOND) {
+        isLongPause = (s_wiggleLegIndex == (s_wiggleTotalLegs - 1));
+    } else {
+        uint8_t legInPair = s_wiggleLegIndex % LEGS_PER_PAIR;
+        isLongPause = (legInPair == (LEGS_PER_PAIR - 1));
+    }
 
-    // Wait WIGGLE_LEG_DURATION_MS after each pulse train within a pair,
-    // and WIGGLE_PAIR_PAUSE_MS after the last pulse train of a pair.
-    uint32_t pauseUs = (isEndOfPair ? static_cast<uint32_t>(WIGGLE_PAIR_PAUSE_MS)
+    // Wait WIGGLE_LEG_DURATION_MS after each pulse train within a sequence,
+    // and WIGGLE_PAIR_PAUSE_MS after the last pulse train of a pair/diamond.
+    uint32_t pauseUs = (isLongPause ? static_cast<uint32_t>(WIGGLE_PAIR_PAUSE_MS)
                                     : static_cast<uint32_t>(WIGGLE_LEG_DURATION_MS)) * 1000UL;
 
     if ((nowUs - s_wigglePauseStartUs) >= pauseUs) {
         s_wiggleWaitingPause = false;
         s_wiggleLegIndex++;
         if (s_wiggleLegIndex < s_wiggleTotalLegs) {
-            uint8_t nextLegInPair = s_wiggleLegIndex % LEGS_PER_PAIR;
-            bool firstDirection   = (nextLegInPair < WIGGLE_STEPS_PER_DIRECTION);
-            int32_t delta         = firstDirection ? -WIGGLE_STEP_DELTA : +WIGGLE_STEP_DELTA;
-            if (s_wiggleVertical) {
-                amigaMouse.queueRawSteps(0, delta);
-            } else {
-                amigaMouse.queueRawSteps(delta, 0);
-            }
+            if (s_wiggleMode == JIGGLE_DIAMOND) {
+                uint8_t segIdx = s_wiggleLegIndex / WIGGLE_STEPS_PER_DIRECTION;
+                int32_t dx = 0, dy = 0;
+                getDiamondStepDelta(segIdx, dx, dy);
+                amigaMouse.queueRawSteps(dx, dy);
 #if ENABLE_SERIAL_DEBUG
-            if (s_verboseDebug) {
-                const char *dirName = s_wiggleVertical ? (firstDirection ? "UP" : "DOWN")
-                                                       : (firstDirection ? "LEFT" : "RIGHT");
-                uint8_t stepInDir   = (nextLegInPair % WIGGLE_STEPS_PER_DIRECTION) + 1;
-                Serial.printf("[AmigaMouse] Artificial jiggle pair %u/%u step %u/%u %s (%+ld steps)\n",
-                              (s_wiggleLegIndex / LEGS_PER_PAIR) + 1,
-                              s_wiggleTotalLegs / LEGS_PER_PAIR,
-                              stepInDir,
-                              static_cast<unsigned>(WIGGLE_STEPS_PER_DIRECTION),
-                              dirName,
-                              static_cast<long>(delta));
-            }
+                if (s_verboseDebug) {
+                    uint8_t stepInSeg = (s_wiggleLegIndex % WIGGLE_STEPS_PER_DIRECTION) + 1;
+                    Serial.printf("[AmigaMouse] Artificial diamond seg %u/%u step %u/%u (dx=%+ld, dy=%+ld)\n",
+                                  segIdx + 1,
+                                  static_cast<unsigned>(DIAMOND_SEGMENTS),
+                                  stepInSeg,
+                                  static_cast<unsigned>(WIGGLE_STEPS_PER_DIRECTION),
+                                  static_cast<long>(dx),
+                                  static_cast<long>(dy));
+                }
 #endif
+            } else {
+                uint8_t nextLegInPair = s_wiggleLegIndex % LEGS_PER_PAIR;
+                bool firstDirection   = (nextLegInPair < WIGGLE_STEPS_PER_DIRECTION);
+                int32_t delta         = firstDirection ? -WIGGLE_STEP_DELTA : +WIGGLE_STEP_DELTA;
+                bool vertical         = (s_wiggleMode == JIGGLE_VERTICAL);
+                if (vertical) {
+                    amigaMouse.queueRawSteps(0, delta);
+                } else {
+                    amigaMouse.queueRawSteps(delta, 0);
+                }
+#if ENABLE_SERIAL_DEBUG
+                if (s_verboseDebug) {
+                    const char *dirName = vertical ? (firstDirection ? "UP" : "DOWN")
+                                                   : (firstDirection ? "LEFT" : "RIGHT");
+                    uint8_t stepInDir   = (nextLegInPair % WIGGLE_STEPS_PER_DIRECTION) + 1;
+                    Serial.printf("[AmigaMouse] Artificial jiggle pair %u/%u step %u/%u %s (%+ld steps)\n",
+                                  (s_wiggleLegIndex / LEGS_PER_PAIR) + 1,
+                                  s_wiggleTotalLegs / LEGS_PER_PAIR,
+                                  stepInDir,
+                                  static_cast<unsigned>(WIGGLE_STEPS_PER_DIRECTION),
+                                  dirName,
+                                  static_cast<long>(delta));
+                }
+#endif
+            }
         }
     }
 }
@@ -474,8 +566,8 @@ void loop() {
 #if ENABLE_SERIAL_DEBUG
         Serial.println(F("[ConfigMode] Entered configuration mode! Release both buttons, then click twice (L+L, R+R, or L+R/R+L)."));
 #endif
-        // Acknowledge entering configuration mode with 1 Up/Down jiggle
-        startCursorJiggle(1, true);
+        // Acknowledge entering configuration mode by tracing a clockwise diamond
+        startCursorDiamond();
         startStatusLedBlink(1);
     }
 
