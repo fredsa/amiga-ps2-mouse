@@ -38,14 +38,6 @@ public:
     void setLeftRightSwapped(bool swapped) { _swapLeftRight = swapped; }
     bool toggleLeftRightSwapped() { _swapLeftRight = !_swapLeftRight; return _swapLeftRight; }
 
-    // Configure movement scaling factor (numerator / denominator) and presets
-    void setScaling(int16_t numerator, int16_t denominator);
-    void setSensitivityPresetIndex(uint8_t index);
-    void cycleSensitivityPreset();
-    void increaseSensitivityPreset();
-    void decreaseSensitivityPreset();
-    uint8_t getSensitivityPresetIndex() const { return _presetIndex; }
-
     // Diagnostics accessors
     int32_t getPendingX() const { return _accumX; }
     int32_t getPendingY() const { return _accumY; }
@@ -67,13 +59,6 @@ private:
     // Pending quadrature steps to emit
     int32_t _accumX;
     int32_t _accumY;
-
-    // Fractional scaling remainders so slow sub-step movements are preserved
-    int32_t _remX;
-    int32_t _remY;
-    int16_t _scaleNum;
-    int16_t _scaleDen;
-    uint8_t _presetIndex;
 
     // Timestamps (microseconds) of last quadrature transition per axis
     uint32_t _lastStepXUs;

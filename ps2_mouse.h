@@ -106,6 +106,8 @@ private:
     bool           _connected;
     bool           _hasWheel;
     uint8_t        _deviceId;
+    uint8_t        _targetResolution;
+    bool           _targetScaling2To1;
     PS2MouseStatus _defaultStatus;
     PS2MouseStatus _status;
 

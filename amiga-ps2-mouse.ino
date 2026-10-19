@@ -27,8 +27,8 @@ static AmigaMouse amigaMouse(
 
 // Configuration mode state machine triggered by holding physical LMB + RMB for 1 second,
 // followed by two physical clicks:
-//   - Left then Left   -> Decrease sensitivity
-//   - Right then Right -> Increase sensitivity
+//   - Left then Left   -> Decrease PS/2 mouse resolution (cnt/mm: 8 -> 4 -> 2 -> 1)
+//   - Right then Right -> Increase PS/2 mouse resolution (cnt/mm: 1 -> 2 -> 4 -> 8)
 //   - Left then Right (or Right then Left) -> Toggle Left/Right button swap
 enum ConfigState : uint8_t {
     CFG_IDLE = 0,
@@ -288,41 +288,20 @@ static void handleSerialCommands() {
         char ch = static_cast<char>(Serial.read());
         switch (ch) {
             case '1':
-                amigaMouse.setSensitivityPresetIndex(0);
-                Serial.println(F("[AmigaMouse] Sensitivity set to #1: 50% (1:2)"));
-                startCursorJiggle(1, true);
-                startStatusLedBlink(1);
-                break;
             case '2':
-                amigaMouse.setSensitivityPresetIndex(1);
-                Serial.println(F("[AmigaMouse] Sensitivity set to #2: 75% (3:4)"));
-                startCursorJiggle(2, true);
-                startStatusLedBlink(2);
-                break;
             case '3':
-                amigaMouse.setSensitivityPresetIndex(2);
-                Serial.println(F("[AmigaMouse] Sensitivity set to #3: 100% (1:1)"));
-                startCursorJiggle(3, true);
-                startStatusLedBlink(3);
+            case '4': {
+                uint8_t resCode = static_cast<uint8_t>(ch - '1');
+                Serial.printf("[PS2Mouse] Setting PS/2 hardware resolution to code %u (%u counts/mm)...\n",
+                              static_cast<unsigned>(resCode),
+                              static_cast<unsigned>(1U << resCode));
+                if (!ps2Mouse.applyResolution(resCode)) {
+                    Serial.println(F("[PS2Mouse] Failed to set PS/2 resolution."));
+                }
+                startCursorJiggle(resCode + 1, true);
+                startStatusLedBlink(resCode + 1);
                 break;
-            case '4':
-                amigaMouse.setSensitivityPresetIndex(3);
-                Serial.println(F("[AmigaMouse] Sensitivity set to #4: 125% (5:4)"));
-                startCursorJiggle(4, true);
-                startStatusLedBlink(4);
-                break;
-            case '5':
-                amigaMouse.setSensitivityPresetIndex(4);
-                Serial.println(F("[AmigaMouse] Sensitivity set to #5: 150% (3:2)"));
-                startCursorJiggle(5, true);
-                startStatusLedBlink(5);
-                break;
-            case '6':
-                amigaMouse.setSensitivityPresetIndex(5);
-                Serial.println(F("[AmigaMouse] Sensitivity set to #6: 200% (2:1)"));
-                startCursorJiggle(6, true);
-                startStatusLedBlink(6);
-                break;
+            }
             case 'b':
             case 'B': {
                 bool swapped = amigaMouse.toggleLeftRightSwapped();
@@ -350,6 +329,8 @@ static void handleSerialCommands() {
                 if (!ps2Mouse.applyResolution(nextRes)) {
                     Serial.println(F("[PS2Mouse] Failed to set PS/2 resolution."));
                 }
+                startCursorJiggle(nextRes + 1, true);
+                startStatusLedBlink(nextRes + 1);
                 break;
             }
             case '[': {
@@ -361,6 +342,8 @@ static void handleSerialCommands() {
                 if (!ps2Mouse.applyResolution(nextRes)) {
                     Serial.println(F("[PS2Mouse] Failed to set PS/2 resolution."));
                 }
+                startCursorJiggle(nextRes + 1, true);
+                startStatusLedBlink(nextRes + 1);
                 break;
             }
             case ']': {
@@ -372,6 +355,8 @@ static void handleSerialCommands() {
                 if (!ps2Mouse.applyResolution(nextRes)) {
                     Serial.println(F("[PS2Mouse] Failed to set PS/2 resolution."));
                 }
+                startCursorJiggle(nextRes + 1, true);
+                startStatusLedBlink(nextRes + 1);
                 break;
             }
             case 'v':
@@ -391,10 +376,12 @@ static void handleSerialCommands() {
             case 's':
             case 'S':
                 Serial.printf(
-                    "[Status] Connected=%d | DevID=0x%02X | Preset=#%u | SwapLR=%d | Packets=%lu | Errors=%lu | Pending=(%ld,%ld) | Verbose=%d\n",
+                    "[Status] Connected=%d | DevID=0x%02X | Res=%u cnt/mm (code %u) | Scaling=%s | SwapLR=%d | Packets=%lu | Errors=%lu | Pending=(%ld,%ld) | Verbose=%d\n",
                     ps2Mouse.isConnected() ? 1 : 0,
                     ps2Mouse.getDeviceId(),
-                    amigaMouse.getSensitivityPresetIndex() + 1,
+                    static_cast<unsigned>(1U << (ps2Mouse.getStatus().resolutionCode & 0x03)),
+                    static_cast<unsigned>(ps2Mouse.getStatus().resolutionCode & 0x03),
+                    ps2Mouse.getStatus().scaling2To1 ? "2:1" : "1:1",
                     amigaMouse.isLeftRightSwapped() ? 1 : 0,
                     static_cast<unsigned long>(ps2Mouse.getPacketCount()),
                     static_cast<unsigned long>(ps2Mouse.getErrorCount()),
@@ -409,7 +396,7 @@ static void handleSerialCommands() {
             case 'h':
             case 'H':
             case '?':
-                Serial.println(F("[Help] Serial Commands: 1-6=Amiga sensitivity | b=Swap L/R | c=Toggle PS/2 scaling (1:1/2:1) | e=Cycle PS/2 resolution | [/]=Dec/Inc PS/2 resolution | v=Toggle verbose | s=Status | r=Reset mouse"));
+                Serial.println(F("[Help] Serial Commands: 1-4=Set PS/2 resolution (1/2/4/8 cnt/mm) | [/]=Dec/Inc PS/2 resolution | e=Cycle PS/2 resolution | c=Toggle PS/2 scaling (1:1/2:1) | b=Swap L/R | v=Toggle verbose | s=Status | r=Reset mouse"));
                 break;
             default:
                 break;
@@ -530,14 +517,14 @@ void loop() {
                 s_cfgClickReleased      = false;
                 s_configState           = CFG_WAIT_TWO_CLICKS;
 #if ENABLE_SERIAL_DEBUG
-                Serial.println(F("[ConfigMode] Both buttons released. Waiting for two clicks (L+L=-Sens, R+R=+Sens, L+R or R+L=Toggle Swap)..."));
+                Serial.println(F("[ConfigMode] Both buttons released. Waiting for two clicks (L+L=-Res cnt/mm, R+R=+Res cnt/mm, L+R or R+L=Toggle Swap)..."));
 #endif
             }
         } else if (s_configState == CFG_WAIT_TWO_CLICKS) {
             // Ignore dx/dy; latch physical two-click sequence (even if the entry jiggle
             // or its post-jiggle pause is still finishing):
-            //   Left + Left   -> Decrease sensitivity (CFG_CLICK_LEFT)
-            //   Right + Right -> Increase sensitivity (CFG_CLICK_RIGHT)
+            //   Left + Left   -> Decrease PS/2 mouse resolution (cnt/mm) (CFG_CLICK_LEFT)
+            //   Right + Right -> Increase PS/2 mouse resolution (cnt/mm) (CFG_CLICK_RIGHT)
             //   Left + Right or Right + Left -> Toggle L/R swap (CFG_CLICK_SWAP)
             if (s_cfgFirstClick == CFG_CLICK_NONE) {
                 if (packet.leftButton && !packet.rightButton && !packet.middleButton) {
@@ -567,9 +554,9 @@ void loop() {
 
                 if (secondClick != CFG_CLICK_NONE) {
                     if (s_cfgFirstClick == CFG_CLICK_LEFT && secondClick == CFG_CLICK_LEFT) {
-                        s_cfgPendingAction = CFG_CLICK_LEFT;  // 2x Left = decrease sensitivity
+                        s_cfgPendingAction = CFG_CLICK_LEFT;  // 2x Left = decrease PS/2 resolution (cnt/mm)
                     } else if (s_cfgFirstClick == CFG_CLICK_RIGHT && secondClick == CFG_CLICK_RIGHT) {
-                        s_cfgPendingAction = CFG_CLICK_RIGHT; // 2x Right = increase sensitivity
+                        s_cfgPendingAction = CFG_CLICK_RIGHT; // 2x Right = increase PS/2 resolution (cnt/mm)
                     } else {
                         s_cfgPendingAction = CFG_CLICK_SWAP;  // L->R or R->L = toggle L/R swap
                     }
@@ -604,7 +591,7 @@ void loop() {
         amigaMouse.clearPendingSteps();
 
 #if ENABLE_SERIAL_DEBUG
-        Serial.println(F("[ConfigMode] Entered configuration mode! Release both buttons, then click twice (L+L, R+R, or L+R/R+L)."));
+        Serial.println(F("[ConfigMode] Entered configuration mode! Release both buttons, then click twice (L+L=-Res, R+R=+Res, or L+R/R+L=Swap)."));
 #endif
         // Acknowledge entering configuration mode by tracing a clockwise diamond
         startCursorDiamond();
@@ -622,21 +609,29 @@ void loop() {
         amigaMouse.getPendingX() == 0 &&
         amigaMouse.getPendingY() == 0) {
         if (s_cfgPendingAction == CFG_CLICK_LEFT) {
-            amigaMouse.decreaseSensitivityPreset();
-            uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
+            uint8_t curRes  = ps2Mouse.getStatus().resolutionCode & 0x03;
+            uint8_t nextRes = (curRes > 0) ? (curRes - 1) : 0;
 #if ENABLE_SERIAL_DEBUG
-            Serial.printf("[ConfigMode] 2x LEFT click -> Sensitivity preset #%u\n", presetNum);
+            Serial.printf("[ConfigMode] 2x LEFT click -> PS/2 resolution %u counts/mm (code %u)\n",
+                          static_cast<unsigned>(1U << nextRes),
+                          static_cast<unsigned>(nextRes));
 #endif
-            startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
-            startStatusLedBlink(presetNum);
+            ps2Mouse.applyResolution(nextRes);
+            uint8_t jiggleCount = (ps2Mouse.getStatus().resolutionCode & 0x03) + 1;
+            startCursorJiggle(jiggleCount, true); // Acknowledge with 1..4 Up/Down pairs (for 1, 2, 4, 8 cnt/mm)
+            startStatusLedBlink(jiggleCount);
         } else if (s_cfgPendingAction == CFG_CLICK_RIGHT) {
-            amigaMouse.increaseSensitivityPreset();
-            uint8_t presetNum = amigaMouse.getSensitivityPresetIndex() + 1;
+            uint8_t curRes  = ps2Mouse.getStatus().resolutionCode & 0x03;
+            uint8_t nextRes = (curRes < 3) ? (curRes + 1) : 3;
 #if ENABLE_SERIAL_DEBUG
-            Serial.printf("[ConfigMode] 2x RIGHT click -> Sensitivity preset #%u\n", presetNum);
+            Serial.printf("[ConfigMode] 2x RIGHT click -> PS/2 resolution %u counts/mm (code %u)\n",
+                          static_cast<unsigned>(1U << nextRes),
+                          static_cast<unsigned>(nextRes));
 #endif
-            startCursorJiggle(presetNum, true); // Acknowledge with presetNum Up/Down pairs
-            startStatusLedBlink(presetNum);
+            ps2Mouse.applyResolution(nextRes);
+            uint8_t jiggleCount = (ps2Mouse.getStatus().resolutionCode & 0x03) + 1;
+            startCursorJiggle(jiggleCount, true); // Acknowledge with 1..4 Up/Down pairs (for 1, 2, 4, 8 cnt/mm)
+            startStatusLedBlink(jiggleCount);
         } else if (s_cfgPendingAction == CFG_CLICK_SWAP) {
             bool swapped = amigaMouse.toggleLeftRightSwapped();
 #if ENABLE_SERIAL_DEBUG

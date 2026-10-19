@@ -68,24 +68,23 @@ The Amiga 1000 Mouse Port (Port 1) uses a standard DE-9 male connector on the co
 ## Features & Operation
 
 - **Anti-Overflow Quadrature Pacing:** The Amiga `Denise` chip uses an 8-bit signed counter per axis (`JOY0DAT`, `-128` to `+127`) sampled once per 50 Hz PAL (20 ms) or 60 Hz NTSC (16.7 ms) vertical blanking interrupt. The driver adaptively paces quadrature transitions down to a minimum interval of `200 µs` (max 100 counts per 20 ms frame), preventing pointer reversal on fast mouse flicks.
-- **Configuration Mode (Sensitivity & Left/Right Button Swap):**
+- **Configuration Mode (PS/2 Resolution `cnt/mm` & Left/Right Button Swap):**
+  - All movement scaling is performed directly by the PS/2 mouse hardware (defaults: `8 counts/mm` resolution, `2:1` scaling). The ESP32-S3 translates PS/2 counts `1:1` into Amiga quadrature steps without fractional software scaling.
   - Physical Left and Right buttons are **swapped by default** (`AMIGA_DEFAULT_SWAP_BUTTONS = 1` in [`config.h`](config.h)).
   - Hold **Left + Right** physical buttons simultaneously for **1 second** to enter **Configuration Mode** (acknowledged by tracing a **clockwise diamond** with the cursor: Up to 12 o'clock $\rightarrow$ Down/Right to 3 o'clock $\rightarrow$ Left/Down to 6 o'clock $\rightarrow$ Left/Up to 9 o'clock $\rightarrow$ Right/Up to 12 o'clock $\rightarrow$ Down to center). While in configuration mode, mouse movement and clicks are not passed to the Amiga.
   - Release both buttons, then perform **two** physical button clicks (always physical, regardless of swap mode):
-    - **Left Click then Left Click**: Decrease sensitivity by 1 level (minimum `#1`), acknowledged by `N` **Up/Down** jiggles (`1`–`6`).
-    - **Right Click then Right Click**: Increase sensitivity by 1 level (maximum `#6`), acknowledged by `N` **Up/Down** jiggles (`1`–`6`).
+    - **Left Click then Left Click**: Decrease PS/2 mouse resolution (`cnt/mm`) by 1 step (minimum `1 count/mm`, code `0`), acknowledged by `1`–`4` **Up/Down** jiggles.
+    - **Right Click then Right Click**: Increase PS/2 mouse resolution (`cnt/mm`) by 1 step (maximum `8 counts/mm`, code `3`), acknowledged by `1`–`4` **Up/Down** jiggles.
     - **Left Click then Right Click** (or **Right Click then Left Click**): Toggle the **Swap Left/Right Buttons** flag, acknowledged by **1 Left/Right** wiggle.
-  - **Sensitivity Presets (`SCALING_PRESETS` in [`amiga_mouse.cpp`](amiga_mouse.cpp)):**
+  - **PS/2 Mouse Hardware Resolutions (`0xE8` command):**
 
-    | Preset | Speed | Scale Ratio | Feedback (Up/Down Jiggles) | Notes |
-    | :---: | :---: | :---: | :---: | :--- |
-    | **#1** | `50%` | `1 : 2` | 1× Up/Down | Fine precision |
-    | **#2** | `75%` | `3 : 4` | 2× Up/Down | — |
-    | **#3** | `100%` | `1 : 1` | 3× Up/Down | 1:1 native counts |
-    | **#4** | `125%` | `5 : 4` | 4× Up/Down | **Default** |
-    | **#5** | `150%` | `3 : 2` | 5× Up/Down | — |
-    | **#6** | `200%` | `2 : 1` | 6× Up/Down | Fast |
+    | Resolution Code | PS/2 Resolution | Feedback (Up/Down Jiggles) | Notes |
+    | :---: | :---: | :---: | :--- |
+    | `0` | `1 count/mm` | 1× Up/Down | Finest precision |
+    | `1` | `2 counts/mm` | 2× Up/Down | — |
+    | `2` | `4 counts/mm` | 3× Up/Down | Power-on PS/2 default |
+    | `3` | `8 counts/mm` | 4× Up/Down | **Adapter Default** (Fastest) |
 
   - Real-time USB Serial packet and button logging is enabled by default via `ENABLE_USB_VERBOSE_DEBUG` in [`config.h`](config.h).
-  - Send keys `1`–`6` (Amiga sensitivity), `b` (toggle button swap), `c` (toggle PS/2 hardware scaling `1:1`/`2:1`), `e` or `[`/`]` (cycle or decrease/increase PS/2 hardware resolution `1`/`2`/`4`/`8` counts/mm), `v` (toggle verbose logging), `s` (status & interrogated PS/2 config), `r` (reset mouse), or `h`/`?` (help) over the 115200 baud USB Serial Monitor.
+  - Send keys `1`–`4` (set PS/2 hardware resolution to `1`/`2`/`4`/`8` counts/mm), `[`/`]` or `e` (decrease/increase or cycle PS/2 resolution), `c` (toggle PS/2 hardware scaling `1:1`/`2:1`), `b` (toggle button swap), `v` (toggle verbose logging), `s` (status & interrogated PS/2 config), `r` (reset mouse), or `h`/`?` (help) over the 115200 baud USB Serial Monitor.
 - **Hot-Plug Support:** Automatically detects the PS/2 `0xAA 0x00` Basic Assurance Test sequence if the mouse is unplugged and reconnected.

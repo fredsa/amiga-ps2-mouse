@@ -19,22 +19,6 @@
 static constexpr uint8_t QUAD_PULSE_TABLE[4]  = { LOW, HIGH, HIGH, LOW };
 static constexpr uint8_t QUAD_QPULSE_TABLE[4] = { LOW, LOW,  HIGH, HIGH };
 
-struct ScalingPreset {
-    int16_t num;
-    int16_t den;
-};
-
-static constexpr ScalingPreset SCALING_PRESETS[] = {
-    { 1, 2 }, // #1: 50% speed  (fine precision)
-    { 3, 4 }, // #2: 75% speed
-    { 1, 1 }, // #3: 100% speed (1:1 native)
-    { 5, 4 }, // #4: 125% speed (default)
-    { 3, 2 }, // #5: 150% speed
-    { 2, 1 }  // #6: 200% speed (fast)
-};
-static constexpr uint8_t NUM_SCALING_PRESETS = sizeof(SCALING_PRESETS) / sizeof(SCALING_PRESETS[0]);
-static_assert(AMIGA_DEFAULT_PRESET_INDEX < NUM_SCALING_PRESETS, "AMIGA_DEFAULT_PRESET_INDEX out of range");
-
 AmigaMouse::AmigaMouse(uint8_t vPin,
                        uint8_t hPin,
                        uint8_t vqPin,
@@ -53,11 +37,6 @@ AmigaMouse::AmigaMouse(uint8_t vPin,
       _phaseY(0),
       _accumX(0),
       _accumY(0),
-      _remX(0),
-      _remY(0),
-      _scaleNum(SCALING_PRESETS[AMIGA_DEFAULT_PRESET_INDEX].num),
-      _scaleDen(SCALING_PRESETS[AMIGA_DEFAULT_PRESET_INDEX].den),
-      _presetIndex(AMIGA_DEFAULT_PRESET_INDEX),
       _lastStepXUs(0),
       _lastStepYUs(0),
       _leftPressed(false),
@@ -123,67 +102,26 @@ void AmigaMouse::setButtons(bool left, bool right, bool middle) {
     }
 }
 
-void AmigaMouse::setScaling(int16_t numerator, int16_t denominator) {
-    if (numerator > 0 && denominator > 0) {
-        _scaleNum = numerator;
-        _scaleDen = denominator;
-        _remX = 0;
-        _remY = 0;
-    }
-}
-
-void AmigaMouse::setSensitivityPresetIndex(uint8_t index) {
-    if (index < NUM_SCALING_PRESETS) {
-        _presetIndex = index;
-        setScaling(SCALING_PRESETS[_presetIndex].num, SCALING_PRESETS[_presetIndex].den);
-    }
-}
-
-void AmigaMouse::cycleSensitivityPreset() {
-    setSensitivityPresetIndex((_presetIndex + 1) % NUM_SCALING_PRESETS);
-}
-
-void AmigaMouse::increaseSensitivityPreset() {
-    if (_presetIndex + 1 < NUM_SCALING_PRESETS) {
-        setSensitivityPresetIndex(_presetIndex + 1);
-    }
-}
-
-void AmigaMouse::decreaseSensitivityPreset() {
-    if (_presetIndex > 0) {
-        setSensitivityPresetIndex(_presetIndex - 1);
-    }
-}
-
 void AmigaMouse::processPs2Packet(const PS2MousePacket &packet) {
     // Update Left, Right, and Middle mouse buttons immediately (applying L/R swap if enabled)
     bool outLeft  = _swapLeftRight ? packet.rightButton : packet.leftButton;
     bool outRight = _swapLeftRight ? packet.leftButton  : packet.rightButton;
     setButtons(outLeft, outRight, packet.middleButton);
 
-    // Convert PS/2 coordinate deltas to Amiga screen deltas:
+    // Convert PS/2 coordinate deltas 1:1 to Amiga screen deltas:
     //   PS/2:  +X = Right, +Y = Up
     //   Amiga: +X = Right, +Y = Down
-    int32_t rawDx = packet.dx;
-    int32_t rawDy = -packet.dy;
+    int32_t stepsX = packet.dx;
+    int32_t stepsY = -packet.dy;
 
 #if AMIGA_INVERT_X
-    rawDx = -rawDx;
+    stepsX = -stepsX;
 #endif
 #if AMIGA_INVERT_Y
-    rawDy = -rawDy;
+    stepsY = -stepsY;
 #endif
 
-    // Apply fractional scaling while preserving sub-pixel remainder
-    int32_t scaledNumX = (rawDx * _scaleNum) + _remX;
-    int32_t stepsX     = scaledNumX / _scaleDen;
-    _remX              = scaledNumX % _scaleDen;
-
-    int32_t scaledNumY = (rawDy * _scaleNum) + _remY;
-    int32_t stepsY     = scaledNumY / _scaleDen;
-    _remY              = scaledNumY % _scaleDen;
-
-    // Accumulate clamped deltas so large flicks don't cause multi-second lag
+    // Accumulate clamped 1:1 deltas so large flicks don't cause multi-second lag
     _accumX = constrain(_accumX + stepsX, -AMIGA_MAX_ACCUMULATED_DELTA, AMIGA_MAX_ACCUMULATED_DELTA);
     _accumY = constrain(_accumY + stepsY, -AMIGA_MAX_ACCUMULATED_DELTA, AMIGA_MAX_ACCUMULATED_DELTA);
 }
@@ -196,8 +134,6 @@ void AmigaMouse::queueRawSteps(int32_t stepsX, int32_t stepsY) {
 void AmigaMouse::clearPendingSteps() {
     _accumX = 0;
     _accumY = 0;
-    _remX = 0;
-    _remY = 0;
 }
 
 uint32_t AmigaMouse::computeStepIntervalUs(int32_t pendingSteps) const {

@@ -51,6 +51,8 @@ PS2Mouse::PS2Mouse(uint8_t clkPin, uint8_t dataPin)
       _connected(false),
       _hasWheel(false),
       _deviceId(0x00),
+      _targetResolution(PS2_DEFAULT_RESOLUTION & 0x03),
+      _targetScaling2To1(PS2_DEFAULT_SCALING_2_1 != 0),
       _defaultStatus{},
       _status{} {
     memset(_packetBuf, 0, sizeof(_packetBuf));
@@ -351,10 +353,13 @@ bool PS2Mouse::setScaling(bool scaling2To1) {
 }
 
 bool PS2Mouse::applyScaling(bool scaling2To1) {
+    _targetScaling2To1 = scaling2To1;
     // Pause streaming (0xF5) so movement bytes cannot collide with commands or 0xE9 reply
     sendCommand(PS2_CMD_DISABLE_REPORTING);
     bool ok = setScaling(scaling2To1);
-    queryStatus(_status);
+    if (!queryStatus(_status)) {
+        _status.scaling2To1 = scaling2To1;
+    }
     if (enableStreaming() && _status.valid) {
         _status.reportingEnabled = true;
         _status.rawStatus |= 0x20;
@@ -368,10 +373,14 @@ bool PS2Mouse::applyScaling(bool scaling2To1) {
 }
 
 bool PS2Mouse::applyResolution(uint8_t resolutionCode) {
+    uint8_t code = resolutionCode & 0x03;
+    _targetResolution = code;
     // Pause streaming (0xF5) so movement bytes cannot collide with commands or 0xE9 reply
     sendCommand(PS2_CMD_DISABLE_REPORTING);
-    bool ok = setResolution(resolutionCode);
-    queryStatus(_status);
+    bool ok = setResolution(code);
+    if (!queryStatus(_status)) {
+        _status.resolutionCode = code;
+    }
     if (enableStreaming() && _status.valid) {
         _status.reportingEnabled = true;
         _status.rawStatus |= 0x20;
@@ -555,7 +564,11 @@ bool PS2Mouse::configureDevice() {
 
     // Interrogate active configuration (scaling, resolution, sample rate, mode) via 0xE9
     // before enabling streaming so no movement packets can interleave with the 3-byte reply.
-    queryStatus(_status);
+    if (!queryStatus(_status)) {
+        _status.resolutionCode = PS2_DEFAULT_RESOLUTION & 0x03;
+        _status.scaling2To1    = (PS2_DEFAULT_SCALING_2_1 != 0);
+        _status.sampleRate     = PS2_DEFAULT_SAMPLE_RATE;
+    }
 
     // Enable continuous data reporting (0xF4)
     if (!enableStreaming()) {
