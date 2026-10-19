@@ -43,7 +43,7 @@
 #define PS2_DEFAULT_SAMPLE_RATE 100
 
 // Resolution code: 0 = 1 count/mm, 1 = 2 counts/mm, 2 = 4 counts/mm, 3 = 8 counts/mm
-#define PS2_DEFAULT_RESOLUTION  2
+#define PS2_DEFAULT_RESOLUTION  3
 
 // Minimum valid PS/2 clock period (microseconds): PS/2 clock is 10-16.7 kHz
 // (60-100 us period). Edges closer than 35 us are bounce or crosstalk glitches.
