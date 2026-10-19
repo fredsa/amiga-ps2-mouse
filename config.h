@@ -70,12 +70,12 @@
 // (-128 to +127), which Intuition/gameport.device reads once per Vertical Blank
 // (50 Hz PAL = 20 ms, 60 Hz NTSC = 16.67 ms).
 //
-// Real Amiga optomechanical mice produce quadrature transitions spaced by
-// ~1-2+ ms. Pacing transitions between 1000 us (1.0 ms fastest) and 2500 us
-// (2.5 ms slow) matches real mouse waveforms for the 74LS157/Denise inputs
-// while keeping each 20 ms PAL frame well below the 127-count JOY0DAT limit.
-#define AMIGA_MIN_STEP_INTERVAL_US  1000  // Fastest step interval (1.0 ms / 1,000 steps/s)
-#define AMIGA_MAX_STEP_INTERVAL_US  2500  // Base step interval for slow movements (2.5 ms)
+// If more than 127 quadrature transitions occur within a single 20 ms PAL frame,
+// the 8-bit counter overflows and the cursor violently reverses direction!
+// Capping the maximum step rate to ~5,000 steps/sec (200 us minimum per step)
+// limits each 20 ms frame to at most 100 counts, completely preventing wrap-around.
+#define AMIGA_MIN_STEP_INTERVAL_US  200   // Fastest step interval (5,000 steps/s)
+#define AMIGA_MAX_STEP_INTERVAL_US  800   // Base step interval for slow movements
 
 // Maximum queued delta counts per axis to prevent runaway lag after a huge flick
 #define AMIGA_MAX_ACCUMULATED_DELTA 512
