@@ -265,6 +265,7 @@ static void handleSerialCommands() {
 }
 
 void setup() {
+    // Use less power, lower clock frequency.
     setCpuFrequencyMhz(ESP32_CPU_FREQ_MHZ);
 
     pinMode(PIN_STATUS_LED, OUTPUT);

@@ -32,9 +32,9 @@
 // Onboard status LED (GPIO 2 or GPIO 48 on many ESP32-S3 DevKitC-1 boards)
 #define PIN_STATUS_LED          PIN_RGB_LED
 
-// Target ESP32-S3 CPU clock frequency in MHz (40 MHz minimizes current draw on
+// Target ESP32-S3 CPU clock frequency in MHz (80 MHz minimizes current draw on
 // Amiga 500 DB9 Pin 7 +5V rail across the 4.7 ohm R401 protection resistor)
-#define ESP32_CPU_FREQ_MHZ      40
+#define ESP32_CPU_FREQ_MHZ      80
 
 // ============================================================================
 // PS/2 Mouse Configuration
