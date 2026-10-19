@@ -59,10 +59,11 @@ static uint32_t s_ledLastToggleMs    = 0;
 static constexpr uint16_t LED_BLINK_INTERVAL_MS = 80;
 
 // Non-blocking artificial cursor jiggle state machine (N x Up/Down or Left/Right pairs)
-static uint8_t  s_wiggleLegIndex   = 0;
-static uint8_t  s_wiggleTotalLegs  = 0; // pairs * 2 * WIGGLE_STEPS_PER_DIRECTION
-static bool     s_wiggleVertical   = true; // true = Up/Down, false = Left/Right
-static uint32_t s_wiggleLegStartMs = 0;
+static uint8_t  s_wiggleLegIndex     = 0;
+static uint8_t  s_wiggleTotalLegs    = 0;     // pairs * 2 * WIGGLE_STEPS_PER_DIRECTION
+static bool     s_wiggleVertical     = true;  // true = Up/Down, false = Left/Right
+static bool     s_wiggleWaitingPause = false; // true once current leg's pulses have finished
+static uint32_t s_wigglePauseStartUs = 0;     // micros() timestamp when current leg finished
 
 static void startStatusLedBlink(uint8_t count) {
     s_ledBlinksRemaining = count * 2; // ON + OFF transitions
@@ -94,10 +95,10 @@ static void startCursorJiggle(uint8_t pairs, bool vertical) {
         return;
     }
     amigaMouse.clearPendingSteps();
-    s_wiggleTotalLegs  = pairs * 2 * WIGGLE_STEPS_PER_DIRECTION;
-    s_wiggleLegIndex   = 0;
-    s_wiggleVertical   = vertical;
-    s_wiggleLegStartMs = millis();
+    s_wiggleTotalLegs    = pairs * 2 * WIGGLE_STEPS_PER_DIRECTION;
+    s_wiggleLegIndex     = 0;
+    s_wiggleVertical     = vertical;
+    s_wiggleWaitingPause = false;
 
     // First step: UP (dy = -WIGGLE_STEP_DELTA) if vertical, or LEFT (dx = -WIGGLE_STEP_DELTA) if horizontal
     if (vertical) {
@@ -120,25 +121,36 @@ static void updateCursorJiggle() {
     if (s_wiggleLegIndex >= s_wiggleTotalLegs) {
         return;
     }
+
+    // 1. Wait until all quadrature pulses for the current leg have been emitted
+    if (amigaMouse.getPendingX() != 0 || amigaMouse.getPendingY() != 0) {
+        return;
+    }
+
+    // 2. Start the inter-train pause timer the instant the pulse train finishes
+    uint32_t nowUs = micros();
+    if (!s_wiggleWaitingPause) {
+        s_wiggleWaitingPause = true;
+        s_wigglePauseStartUs = nowUs;
+        return;
+    }
+
     static constexpr uint8_t LEGS_PER_PAIR = 2 * WIGGLE_STEPS_PER_DIRECTION;
     uint8_t legInPair = s_wiggleLegIndex % LEGS_PER_PAIR;
     bool isEndOfPair  = (legInPair == (LEGS_PER_PAIR - 1));
 
-    // Wait WIGGLE_LEG_DURATION_MS (>= 1 VBlank) after each step within a pair,
-    // and WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS after the last step of a pair.
-    uint32_t waitMs = isEndOfPair ? (WIGGLE_LEG_DURATION_MS + WIGGLE_PAIR_PAUSE_MS)
-                                  : WIGGLE_LEG_DURATION_MS;
+    // Wait WIGGLE_LEG_DURATION_MS after each pulse train within a pair,
+    // and WIGGLE_PAIR_PAUSE_MS after the last pulse train of a pair.
+    uint32_t pauseUs = (isEndOfPair ? static_cast<uint32_t>(WIGGLE_PAIR_PAUSE_MS)
+                                    : static_cast<uint32_t>(WIGGLE_LEG_DURATION_MS)) * 1000UL;
 
-    uint32_t nowMs = millis();
-    if ((nowMs - s_wiggleLegStartMs) >= waitMs &&
-        amigaMouse.getPendingX() == 0 &&
-        amigaMouse.getPendingY() == 0) {
+    if ((nowUs - s_wigglePauseStartUs) >= pauseUs) {
+        s_wiggleWaitingPause = false;
         s_wiggleLegIndex++;
         if (s_wiggleLegIndex < s_wiggleTotalLegs) {
             uint8_t nextLegInPair = s_wiggleLegIndex % LEGS_PER_PAIR;
             bool firstDirection   = (nextLegInPair < WIGGLE_STEPS_PER_DIRECTION);
             int32_t delta         = firstDirection ? -WIGGLE_STEP_DELTA : +WIGGLE_STEP_DELTA;
-            s_wiggleLegStartMs    = nowMs;
             if (s_wiggleVertical) {
                 amigaMouse.queueRawSteps(0, delta);
             } else {
