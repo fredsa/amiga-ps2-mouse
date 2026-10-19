@@ -100,8 +100,9 @@
 #define WIGGLE_LEG_DURATION_MS      25
 #define WIGGLE_PAIR_PAUSE_MS        250
 
-// Enable serial diagnostic output at 115200 baud
-#define ENABLE_SERIAL_DEBUG         1
+// Enable onboard status LED (set to 0 to save power when powered from Amiga mouse port)
+#define ENABLE_STATUS_LED           0
+
 
 // Enable real-time verbose logging of mouse buttons and movement packets over USB Serial
 #define ENABLE_USB_VERBOSE_DEBUG    1

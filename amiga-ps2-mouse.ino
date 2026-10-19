@@ -52,11 +52,13 @@ static bool        s_prevMiddle       = false;
 static bool        s_prevBtn4         = false;
 static bool        s_prevBtn5         = false;
 
+#if ENABLE_STATUS_LED
 // Non-blocking status LED blink state machine
 static uint8_t  s_ledBlinksRemaining = 0;
 static bool     s_ledState           = false;
 static uint32_t s_ledLastToggleMs    = 0;
 static constexpr uint16_t LED_BLINK_INTERVAL_MS = 80;
+#endif
 
 // Non-blocking artificial cursor jiggle state machine (N x Up/Down or Left/Right pairs)
 static uint8_t  s_wiggleLegIndex     = 0;
@@ -66,13 +68,18 @@ static bool     s_wiggleWaitingPause = false; // true once current leg's pulses 
 static uint32_t s_wigglePauseStartUs = 0;     // micros() timestamp when current leg finished
 
 static void startStatusLedBlink(uint8_t count) {
+#if ENABLE_STATUS_LED
     s_ledBlinksRemaining = count * 2; // ON + OFF transitions
     s_ledState = true;
     s_ledLastToggleMs = millis();
     digitalWrite(PIN_STATUS_LED, HIGH);
+#else
+    (void)count;
+#endif
 }
 
 static void updateStatusLedBlink() {
+#if ENABLE_STATUS_LED
     if (s_ledBlinksRemaining == 0) {
         return;
     }
@@ -88,6 +95,7 @@ static void updateStatusLedBlink() {
             digitalWrite(PIN_STATUS_LED, s_ledState ? HIGH : LOW);
         }
     }
+#endif
 }
 
 static void startCursorJiggle(uint8_t pairs, bool vertical) {
@@ -271,6 +279,7 @@ void setup() {
     // Use less power, disable bluetooth.
     btStop();
 
+    // Always drive status LED LOW at boot so it cannot draw power when disabled
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, LOW);
 
@@ -300,7 +309,9 @@ void setup() {
 
     bool ok = ps2Mouse.begin();
     if (ok) {
+#if ENABLE_STATUS_LED
         digitalWrite(PIN_STATUS_LED, HIGH);
+#endif
 #if ENABLE_SERIAL_DEBUG
         Serial.printf("[PS2Mouse] Initialized! Device ID=0x%02X (%s)\n",
                       ps2Mouse.getDeviceId(),
