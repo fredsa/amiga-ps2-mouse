@@ -69,12 +69,12 @@ The Amiga 1000 Mouse Port (Port 1) uses a standard DE-9 male connector on the co
 
 - **Anti-Overflow Quadrature Pacing:** The Amiga `Denise` chip uses an 8-bit signed counter per axis (`JOY0DAT`, `-128` to `+127`) sampled once per 50 Hz PAL (20 ms) or 60 Hz NTSC (16.7 ms) vertical blanking interrupt. The driver adaptively paces quadrature transitions down to a minimum interval of `200 µs` (max 100 counts per 20 ms frame), preventing pointer reversal on fast mouse flicks.
 - **Configuration Mode (Sensitivity & Left/Right Button Swap):**
-  - Physical Left and Right buttons are **swapped by default** (`AMIGA_DEFAULT_SWAP_BUTTONS = 1` in [`config.h`](config.h)).
-  - Hold **Left + Middle + Right** mouse buttons simultaneously for **1 second** to enter **Configuration Mode** (acknowledged by **1 Up/Down cursor jiggle**). While in configuration mode, mouse movement and clicks are not passed to the Amiga.
-  - Release all 3 buttons, then click a single physical button (always physical, regardless of swap mode):
-    - **Left Click**: Decrease sensitivity by 1 level (minimum `#1`), acknowledged by `N` **Up/Down** jiggles (`1`–`6`).
-    - **Right Click**: Increase sensitivity by 1 level (maximum `#6`), acknowledged by `N` **Up/Down** jiggles (`1`–`6`).
-    - **Middle Click**: Toggle the **Swap Left/Right Buttons** flag, acknowledged by **1 Left/Right** wiggle.
+  - Physical Left and Right buttons are **not swapped by default** (`AMIGA_DEFAULT_SWAP_BUTTONS = 0` in [`config.h`](config.h)).
+  - Hold **Left + Right** physical buttons simultaneously for **1 second** to enter **Configuration Mode** (acknowledged by **1 Up/Down cursor jiggle**). While in configuration mode, mouse movement and clicks are not passed to the Amiga.
+  - Release both buttons, then perform **two** physical button clicks (always physical, regardless of swap mode):
+    - **Left Click then Left Click**: Decrease sensitivity by 1 level (minimum `#1`), acknowledged by `N` **Up/Down** jiggles (`1`–`6`).
+    - **Right Click then Right Click**: Increase sensitivity by 1 level (maximum `#6`), acknowledged by `N` **Up/Down** jiggles (`1`–`6`).
+    - **Left Click then Right Click** (or **Right Click then Left Click**): Toggle the **Swap Left/Right Buttons** flag, acknowledged by **1 Left/Right** wiggle.
   - **Sensitivity Presets (`SCALING_PRESETS` in [`amiga_mouse.cpp`](amiga_mouse.cpp)):**
 
     | Preset | Speed | Scale Ratio | Feedback (Up/Down Jiggles) | Notes |
