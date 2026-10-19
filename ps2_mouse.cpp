@@ -37,11 +37,13 @@ PS2Mouse::PS2Mouse(uint8_t clkPin, uint8_t dataPin)
       _parityCount(0),
       _parityOk(false),
       _lastEdgeUs(0),
+      _lastErrorUs(0),
       _rxEnabled(false),
       _rxFrameError(false),
       _errorCount(0),
       _packetIndex(0),
       _packetSize(3),
+      _resyncNeeded(false),
       _lastPacketByteUs(0),
       _lastActivityMs(0),
       _lastWatchdogMs(0),
@@ -105,6 +107,7 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
             // Previous 11-bit frame was incomplete; abort any partial packet
             _errorCount++;
             _rxErrorHead = _rxHead;
+            _lastErrorUs = nowUs;
             _rxFrameError = true;
         }
         _bitIndex = 0;
@@ -123,6 +126,7 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
         } else {
             _errorCount++;
             _rxErrorHead = _rxHead;
+            _lastErrorUs = nowUs;
             _rxFrameError = true;
         }
     } else if (_bitIndex >= 1 && _bitIndex <= 8) {
@@ -147,11 +151,13 @@ void IRAM_ATTR PS2Mouse::handleClockInterrupt() {
             } else {
                 _errorCount++;
                 _rxErrorHead = _rxHead;
+                _lastErrorUs = nowUs;
                 _rxFrameError = true;
             }
         } else {
             _errorCount++;
             _rxErrorHead = _rxHead;
+            _lastErrorUs = nowUs;
             _rxFrameError = true;
         }
         _bitIndex = 0;
@@ -188,6 +194,7 @@ void PS2Mouse::clearRxBuffer() {
     _rxTail = _rxHead;
     _rxErrorHead = _rxHead;
     _packetIndex = 0;
+    _resyncNeeded = false;
     _rxFrameError = false;
 }
 
@@ -527,15 +534,13 @@ bool PS2Mouse::configureDevice() {
     // Interrogate the mouse's power-on default configuration (0xE9) while reporting is disabled
     queryStatus(_defaultStatus);
 
-    // Configure 1:1 scaling and resolution before negotiating IntelliMouse extensions
-    sendCommand(PS2_CMD_SET_SCALING_1_1);
-    setResolution(PS2_DEFAULT_RESOLUTION);
-
     // Enable full mouse functionality (IntelliMouse 0x03 or Explorer 0x04) if supported
     tryEnableIntelliMouse();
 
-    // Set final operating sample rate
+    // Set final operating sample rate, resolution (8 counts/mm), and 2:1 scaling
     setSampleRate(PS2_DEFAULT_SAMPLE_RATE);
+    setResolution(PS2_DEFAULT_RESOLUTION);
+    setScaling(PS2_DEFAULT_SCALING_2_1 != 0);
 
     // Re-query Device ID (0xF2) after all sample-rate/configuration commands so
     // _packetSize (3 vs 4 bytes) is guaranteed to match the mouse's actual mode.
@@ -595,11 +600,16 @@ bool PS2Mouse::poll(PS2MousePacket &outPacket) {
 
     while (true) {
         // If the ISR detected any framing/parity error, discard both any
-        // partial packet in _packetBuf AND any pre-error bytes in _rxBuffer.
+        // partial packet in _packetBuf AND any pre-error bytes in _rxBuffer,
+        // and wait for an inter-packet wire gap (> 3.5 ms) before starting a
+        // new packet so trailing bytes of the corrupted packet are never
+        // misinterpreted as Byte 0.
         if (_rxFrameError) {
             _rxFrameError = false;
             _rxTail = _rxErrorHead;
             _packetIndex = 0;
+            _resyncNeeded = true;
+            _lastPacketByteUs = _lastErrorUs;
         }
 
         if (!readByteFromBuffer(b, byteTimeUs)) {
@@ -611,37 +621,49 @@ bool PS2Mouse::poll(PS2MousePacket &outPacket) {
         // consecutive packets are ~10 ms apart (at 100 Hz). Comparing ISR capture
         // timestamps ensures USB Serial debug printing delays never cause false
         // packet timeouts. Any wire gap > 3.5 ms means a new packet is starting.
-        if (_packetIndex > 0 && (byteTimeUs - _lastPacketByteUs) > PS2_PACKET_TIMEOUT_US) {
-            _packetIndex = 0;
-        }
+        uint32_t gapUs = byteTimeUs - _lastPacketByteUs;
         _lastPacketByteUs = byteTimeUs;
-
         _lastActivityMs = nowMs;
 
-        // Detect hot-plug or brownout self-test completion (0xAA followed by 0x00
-        // and no 3rd packet byte within 5 ms). Because 0xAA has bit 7 set (0xC0 != 0),
-        // it is never a valid normal header byte, and verifying silence after 0x00
-        // distinguishes a 2-byte BAT reset from any 3/4-byte movement packet even
-        // if a power glitch resets the mouse < 500 ms after movement.
-        if (_packetIndex == 0 && b == PS2_RESP_BAT_OK) {
-            uint8_t nextByte = 0;
-            uint8_t thirdByte = 0;
-            if (waitByte(nextByte, 50) && nextByte == 0x00 && !waitByte(thirdByte, 5)) {
-                configureDevice();
-                return false;
+        if (_resyncNeeded) {
+            if (gapUs > PS2_PACKET_TIMEOUT_US) {
+                _resyncNeeded = false;
+                _packetIndex = 0;
+            } else {
+                // Still receiving remaining bytes of the discarded packet; skip them.
+                continue;
             }
-            _errorCount++;
-            continue;
+        } else if (_packetIndex > 0 && gapUs > PS2_PACKET_TIMEOUT_US) {
+            _packetIndex = 0;
         }
 
-        // Validate Byte 0 (header/state byte):
-        // - Bit 3 (0x08) MUST be 1 on all standard PS/2 packets.
-        // - Bits 6 & 7 (0xC0, X/Y overflow) must be 0. Rejecting 0xC0 != 0 at
-        //   Byte 0 prevents negative movement deltas (-1..-128 = 0x80..0xFF)
-        //   from ever being mistaken for a header byte if a byte was dropped.
-        if (_packetIndex == 0 && ((b & 0x08) == 0 || (b & 0xC0) != 0)) {
-            _errorCount++;
-            continue;
+        if (_packetIndex == 0) {
+            // Detect hot-plug or brownout self-test completion (0xAA followed by 0x00
+            // and no 3rd packet byte within 5 ms). Only check when preceded by an
+            // inter-packet gap (> 3.5 ms) so a negative movement byte 0xAA (-86 in
+            // two's complement) can never be mistaken for a BAT reset.
+            if (b == PS2_RESP_BAT_OK && gapUs > PS2_PACKET_TIMEOUT_US) {
+                uint8_t nextByte = 0;
+                uint8_t thirdByte = 0;
+                if (waitByte(nextByte, 50) && nextByte == 0x00 && !waitByte(thirdByte, 5)) {
+                    configureDevice();
+                    return false;
+                }
+                _errorCount++;
+                _resyncNeeded = true;
+                continue;
+            }
+
+            // Validate Byte 0 (header/state byte):
+            // - Bit 3 (0x08) MUST be 1 on all standard PS/2 packets.
+            // Note: Do NOT reject packets with X/Y overflow bits (0x40/0x80) set!
+            // At high resolution (8 counts/mm), fast movement sets 0x40/0x80;
+            // rejecting Byte 0 here would cause rawX/rawY to be parsed as Byte 0!
+            if ((b & 0x08) == 0) {
+                _errorCount++;
+                _resyncNeeded = true;
+                continue;
+            }
         }
 
         _packetBuf[_packetIndex++] = b;
@@ -661,9 +683,24 @@ bool PS2Mouse::poll(PS2MousePacket &outPacket) {
             outPacket.xOverflow    = (state & 0x40) != 0;
             outPacket.yOverflow    = (state & 0x80) != 0;
 
-            // Reconstruct 9-bit signed two's complement X and Y deltas
-            int16_t dx = static_cast<int16_t>(rawX) - ((state & 0x10) ? 256 : 0);
-            int16_t dy = static_cast<int16_t>(rawY) - ((state & 0x20) ? 256 : 0);
+            // Reconstruct 9-bit signed two's complement X and Y deltas.
+            // If the mouse sets the overflow bit (0x40 / 0x80), clamp to the full
+            // 9-bit signed excursion (-256 or +255) according to the sign bit
+            // (0x10 / 0x20). Otherwise a wrapped or 0xFF-saturated rawX/rawY with
+            // sign=1 would decode as 255 - 256 = -1 (stalling Left/Down movement).
+            int16_t dx;
+            if (outPacket.xOverflow) {
+                dx = (state & 0x10) ? -256 : 255;
+            } else {
+                dx = static_cast<int16_t>(rawX) - ((state & 0x10) ? 256 : 0);
+            }
+
+            int16_t dy;
+            if (outPacket.yOverflow) {
+                dy = (state & 0x20) ? -256 : 255;
+            } else {
+                dy = static_cast<int16_t>(rawY) - ((state & 0x20) ? 256 : 0);
+            }
 
             outPacket.dx = dx;
             outPacket.dy = dy;

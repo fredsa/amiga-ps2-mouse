@@ -87,6 +87,7 @@ private:
     volatile uint8_t  _parityCount;
     volatile bool     _parityOk;
     volatile uint32_t _lastEdgeUs;
+    volatile uint32_t _lastErrorUs;
     volatile bool     _rxEnabled;
     volatile bool     _rxFrameError;
     volatile uint32_t _errorCount;
@@ -95,6 +96,7 @@ private:
     uint8_t  _packetBuf[4];
     uint8_t  _packetIndex;
     uint8_t  _packetSize;
+    bool     _resyncNeeded;
     uint32_t _lastPacketByteUs;
     uint32_t _lastActivityMs;
     uint32_t _lastWatchdogMs;

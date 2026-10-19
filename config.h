@@ -45,6 +45,12 @@
 // Resolution code: 0 = 1 count/mm, 1 = 2 counts/mm, 2 = 4 counts/mm, 3 = 8 counts/mm
 #define PS2_DEFAULT_RESOLUTION  3
 
+// Default PS/2 hardware scaling: 1 = 2:1 non-linear acceleration (0xE7), 0 = 1:1 linear (0xE6)
+// Keep at 0 (1:1 linear) because many PS/2 mouse ICs overflow their internal 8-bit
+// signed accumulators on negative deltas (Left/Down) when 8 counts/mm + 2:1 scaling
+// are combined; instead, we maximize sensitivity in 32-bit math via AMIGA_DEFAULT_PRESET_INDEX.
+#define PS2_DEFAULT_SCALING_2_1 0
+
 // Minimum valid PS/2 clock period (microseconds): PS/2 clock is 10-16.7 kHz
 // (60-100 us period). Edges closer than 35 us are bounce or crosstalk glitches.
 #define PS2_MIN_CLOCK_PERIOD_US 35
@@ -85,7 +91,7 @@
 #define AMIGA_INVERT_Y          0
 
 // Default sensitivity preset index (0-based: 0=#1 50%, 1=#2 75%, 2=#3 100%, 3=#4 125%, 4=#5 150%, 5=#6 200%)
-#define AMIGA_DEFAULT_PRESET_INDEX  3
+#define AMIGA_DEFAULT_PRESET_INDEX  5
 
 // Swap physical Left and Right mouse buttons by default (1 = swapped, 0 = normal)
 #define AMIGA_DEFAULT_SWAP_BUTTONS  1
