@@ -268,6 +268,9 @@ void setup() {
     // Use less power, lower clock frequency.
     setCpuFrequencyMhz(ESP32_CPU_FREQ_MHZ);
 
+    // Use less power, disable bluetooth.
+    btStop();
+
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, LOW);
 
