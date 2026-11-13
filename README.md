@@ -2,7 +2,7 @@
 
 An Arduino project for the **ESP32S3 Dev Module** that connects a standard PS/2 mouse to an **Amiga 1000** DE-9 (DB9) mouse port. The microcontroller handles bidirectional PS/2 host communication (initialization, IntelliMouse detection, hot-plug recovery, and movement/button packet decoding) and translates reports into Amiga quadrature signals (`V`, `H`, `VQ`, `HQ`) and active-LOW open-drain button signals (`LMB`, `RMB`, `MMB`).
 
-This project was authored by AI with human prompting and feedback.
+<img width="50%" height="50%" src="adapter.jpg">
 
 ---
 
@@ -88,3 +88,9 @@ The Amiga 1000 Mouse Port (Port 1) uses a standard DE-9 male connector on the co
   - Real-time USB Serial packet and button logging is enabled by default via `ENABLE_USB_VERBOSE_DEBUG` in [`config.h`](config.h).
   - Send keys `1`–`4` (set PS/2 hardware resolution to `1`/`2`/`4`/`8` counts/mm), `[`/`]` or `e` (decrease/increase or cycle PS/2 resolution), `c` (toggle PS/2 hardware scaling `1:1`/`2:1`), `b` (toggle button swap), `v` (toggle verbose logging), `s` (status & interrogated PS/2 config), `r` (reset mouse), or `h`/`?` (help) over the 115200 baud USB Serial Monitor.
 - **Hot-Plug Support:** Automatically detects the PS/2 `0xAA 0x00` Basic Assurance Test sequence if the mouse is unplugged and reconnected.
+
+---
+
+## Authorship
+
+This project was authored by AI with human prompting and feedback.
